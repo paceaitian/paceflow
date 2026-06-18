@@ -666,6 +666,28 @@ function agentLifecyclePromptDenyReason(prompt, artDir = '') {
     ].join('\n');
   }
 
+  if (operation === 'record-correction') {
+    const missing = [];
+    if (!promptHasNonEmptyField(text, 'trigger-quote')) missing.push('trigger-quote');
+    if (!promptHasNonEmptyField(text, 'wrong-behavior')) missing.push('wrong-behavior');
+    if (!promptHasNonEmptyField(text, 'correct-behavior')) missing.push('correct-behavior');
+    if (!promptHasNonEmptyField(text, 'trigger-scenario')) missing.push('trigger-scenario');
+    if (!promptHasNonEmptyField(text, 'root-cause')) missing.push('root-cause');
+    // knowledge-link | project-scope 二选一：两者都缺才 deny（record-correction.md 边界：都缺→missing-fields）
+    if (!promptHasNonEmptyField(text, 'knowledge-link') && !promptHasNonEmptyField(text, 'project-scope')) {
+      missing.push('knowledge-link 或 project-scope（二选一）');
+    }
+    if (missing.length > 0) {
+      return [
+        `派 artifact-writer 执行 record-correction 时缺少必填字段：${missing.join(', ')}。`,
+        FORMAT_SNIPPETS.skillRef,
+        'record-correction 持久化用户纠正：trigger-quote / wrong-behavior / correct-behavior / trigger-scenario / root-cause 五项必填，并二选一提供 knowledge-link（跨项目通用，先在 knowledge/ 选定或新建笔记拿 wikilink）或 project-scope: project-only（仅本项目）。',
+        '请重派同一个 agent，并使用完整 prompt 顶部模板：',
+        promptTemplateForOperation({ prompt, artDir, operation: 'record-correction' })
+      ].join('\n');
+    }
+  }
+
   return '';
 }
 

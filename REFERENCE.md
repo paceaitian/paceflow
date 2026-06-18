@@ -1,4 +1,4 @@
-# PACEflow v7.2.15 参考手册
+# PACEflow v7.2.16 参考手册
 
 > 最后更新：2026-06-16
 > 协议：PACE (Plan-Artifact-Check-Execute-Verify-Review)

@@ -10,27 +10,15 @@ description: >
 
 artifact 由 `artifact-writer` agent 创建和维护。主 session 负责分析、执行代码、验证和向用户确认；artifact 写入动作统一派 agent。
 
+> **本 skill 的定位**：PACEflow **已启用后**的流程引导（P-A-C-E-V-R）。**要不要启用** PACE 不由本 skill 判断，而是 hook 在 SessionStart 确定性处理：强信号（有 `changes/` artifact / `.pace-enabled` / artifact-root 配置）→ 自动门控；软信号（`detectSoftSignal`：3+ 代码文件 / manifest 文件 / dated-plan）→ 注入指示让 AI 在响应用户前用 AskUserQuestion 问用户是否启用。本 skill 被加载时，PACE 通常已启用或正在启用流程中——下面直接讲流程，不再判断「要不要用」。
+
 ---
 
-## 激活判定
-
-```mermaid
-flowchart TD
-    A[收到任务] --> B{符合豁免条件?}
-    B -->|是| C[跳过 PACE]
-    B -->|否| D{Hook 自动检测}
-    D -->|artifact 已存在| E[启用 PACE]
-    D -->|superpowers/native plan| E
-    D -->|.pace-enabled| E
-    D -->|3+ 代码文件| E
-    D -->|无信号| F{AI 自行判断}
-    F -->|满足条件| E
-    F -->|不满足| C
-```
+## 适用范围
 
 启用后遵循 P-A-C-E-V-R。artifact 写入统一派 `artifact-writer` agent，主 session 通过 agent 完成创建/更新。
 
-在已触发 PACEflow 信号的项目中，代码修改任务即使只涉及 1-2 个文件，也先按本 skill 判断流程；收到代码任务立即按流程判断，在第一次 Edit 前进入 PACE。
+在已触发 PACEflow 信号的项目中，代码修改任务即使只涉及 1-2 个文件，也先按本 skill 判断流程；收到代码任务立即按流程判断，在第一次 Edit 前进入 PACE。**一旦启用，写代码文件由写码门强制走 CHG，无豁免**（详见下方「disable 是用户退出权」）。
 
 Artifact 根目录以 hook 注入或 PreToolUse 提示为准。`artifact_dir` 仅用于 PaceFlow artifacts：`spec.md` / `task.md` / `walkthrough.md` / `findings.md` / `corrections.md` / `changes/**`。
 
@@ -40,7 +28,7 @@ Project Root 是 PACEflow 管理边界；`local` artifact root 表示 Project Ro
 
 `spec.md` 是 artifact root 内的项目事实文件，用于记录技术栈、依赖、配置、目录结构和编码约定等长期事实。它由主 session 按需要直接 `Edit` 维护，不派 `artifact-writer`，也不参与 CHG/HOTFIX 的批准、验证或归档流程。
 
-若用户已经明确选择 Obsidian vault、本地项目目录或自定义 artifact 目录，但 artifact-root 配置尚未写入，正确做法是先运行 hook 提示的 `set-artifact-root` helper（`--choice vault`、`--choice local`，或 `--choice <绝对路径或相对 Project Root 路径>`），再从目标项目 cwd 运行 reserve helper。helper 会写入权威 runtime 配置位置。`.pace/artifact-root` 只由 `set-artifact-root` helper 写入；git worktree 与继承父 Project Root 的子目录走宿主项目共享位置。helper 接受自身文档列出的参数；自动化用 `--cwd` 指定项目 cwd，其余 artifact/root/project 路径由 helper 自行解析。
+若用户已经明确选择 Obsidian vault、本地项目目录或自定义 artifact 目录，但 artifact-root 配置尚未写入，正确做法是先运行 hook 提示的 `set-artifact-root` helper（`--choice vault`、`--choice local`，或 `--choice <绝对路径或相对 Project Root 路径>`），再从目标项目 cwd 运行 reserve helper。helper 会写入权威 runtime 配置位置。`.pace/artifact-root` 只由 `set-artifact-root` helper 写入；git worktree 与继承父 Project Root 的子目录走宿主项目共享位置。helper 接受自身文档列出的参数；**reserve 命令默认带 `--cwd <项目 cwd>` 锚定**——Claude 主 session 的 Bash cwd 会在命令间漂移，不带 `--cwd` 时 reservation 可能写错 runtime（后续 artifact-writer 误报「无效或已过期」）；其余 artifact/root/project 路径由 helper 自行解析。
 
 Helper 命令来源按以下顺序执行：
 
@@ -51,12 +39,14 @@ Helper 命令来源按以下顺序执行：
 node "<skill-root>/../../hooks/set-project-root.js" --mode independent
 node "<skill-root>/../../hooks/set-artifact-root.js" --choice local
 node "<skill-root>/../../hooks/set-artifact-root.js" --choice vault
-node "<skill-root>/../../hooks/reserve-artifact-id.js" --operation create-chg
+node "<skill-root>/../../hooks/reserve-artifact-id.js" --operation create-chg --cwd <项目 cwd>
 ```
 
 3. 如果当前上下文没有完整 hook 命令，也没有可用的 skill 根目录元数据，先触发/等待 hook 给出 helper 命令。helper 路径以 hook 命令或 skill 根目录为准，不扫描 `~/.claude/plugins/cache` 猜版本。
 
 ### disable 是用户退出权，非 AI 绕过手段
+
+**PACEflow 一旦启用（hook 检测到信号 / 有 artifact），写代码文件就由写码门强制走 CHG，没有豁免——唯一合法的停用是下面两个用户命令，不是 AI 绕过单次 deny。**
 
 被 PACE deny 拦住时，正确做法是走 PACE 流程（建 CHG / approve-and-start），**不是 disable 绕过**。`/paceflow:disable`（即 `set-activation --disable`）停用整个项目的 PACEflow，只在用户**明确表达「不想用 PACE 管理本项目」**时执行；AI **不得为绕过单次 deny 自主 disable**。若判断用户可能想停用但用户未明说，先用 AskUserQuestion 确认，不自作主张。用户主动运行 `/paceflow:disable` 时直接执行，不再额外确认。
 
@@ -92,7 +82,7 @@ CHG 不是大计划容器，而是**连续执行、可独立验证、可独立�
 
 ### 有 plan 文件
 
-调用 `paceflow:pace-bridge`。bridge 的职责是读取 plan，按上方 CHG 粒度原则拆成 N 个可闭环 CHG。拆出多个时优先**一次性批量落地**：`reserve --operation create-chg --count N` 取 N 个连号，再用一次 batch create（共享 `change-set` / `change-set-total` 头部 + N 个 `--- CHG i/N ---` 块）派 `artifact-writer`（详见 pace-bridge skill「批量创建」），避免「执行完一个才建下一个」把后续阶段规划只留在 session 上下文。生成：
+调用 `paceflow:pace-bridge`。bridge 的职责是读取 plan，按上方 CHG 粒度原则拆成 N 个可闭环 CHG。拆出多个时优先**一次性批量落地**：`reserve --operation create-chg --cwd <项目 cwd> --count N` 取 N 个连号，再用一次 batch create（共享 `change-set` / `change-set-total` 头部 + N 个 `--- CHG i/N ---` 块）派 `artifact-writer`（详见 pace-bridge skill「批量创建」），避免「执行完一个才建下一个」把后续阶段规划只留在 session 上下文。生成：
 
 - `changes/chg-yyyymmdd-nn.md`
 - `task.md` wikilink 索引（唯一 CHG 索引）
@@ -104,25 +94,25 @@ Superpowers/native plan 中用户已参与设计且确认开始时，bridge 只�
 主 session 先预留编号，再组织字段派 artifact writer。优先使用 SessionStart / PreToolUse 提示中的 reserve helper 完整命令；如果上下文没有完整命令，按上方 helper 命令来源从当前 skill 根目录拼出同版本绝对路径。
 
 ```bash
-node "<SessionStart/PreToolUse 输出的 reserve-artifact-id.js 绝对路径>" --operation create-chg
+node "<SessionStart/PreToolUse 输出的 reserve-artifact-id.js 绝对路径>" --operation create-chg --cwd <项目 cwd>
 # 若没有 hook 输出但本 skill 已加载：
-node "<skill-root>/../../hooks/reserve-artifact-id.js" --operation create-chg
+node "<skill-root>/../../hooks/reserve-artifact-id.js" --operation create-chg --cwd <项目 cwd>
 ```
 
 HOTFIX 必须在预留时声明类型：
 
 ```bash
-node "<SessionStart/PreToolUse 输出的 reserve-artifact-id.js 绝对路径>" --operation create-chg --type hotfix
+node "<SessionStart/PreToolUse 输出的 reserve-artifact-id.js 绝对路径>" --operation create-chg --cwd <项目 cwd> --type hotfix
 # 若没有 hook 输出但本 skill 已加载：
-node "<skill-root>/../../hooks/reserve-artifact-id.js" --operation create-chg --type hotfix
+node "<skill-root>/../../hooks/reserve-artifact-id.js" --operation create-chg --cwd <项目 cwd> --type hotfix
 ```
 
 同一 session 默认复用尚未消费的 `create-chg` reservation。若已经预留过普通 CHG，现在要创建 HOTFIX，或确实需要第二个新编号，重新运行 helper 时加 `--new`：
 
 ```bash
-node "<SessionStart/PreToolUse 输出的 reserve-artifact-id.js 绝对路径>" --operation create-chg --type hotfix --new
+node "<SessionStart/PreToolUse 输出的 reserve-artifact-id.js 绝对路径>" --operation create-chg --cwd <项目 cwd> --type hotfix --new
 # 若没有 hook 输出但本 skill 已加载：
-node "<skill-root>/../../hooks/reserve-artifact-id.js" --operation create-chg --type hotfix --new
+node "<skill-root>/../../hooks/reserve-artifact-id.js" --operation create-chg --cwd <项目 cwd> --type hotfix --new
 ```
 
 将 helper 输出的 `artifact_dir` / `operation` / `execution-context` / `reserved-id` / `reserved-file-prefix` 原样放在 Agent prompt 顶部，再追加：
@@ -197,7 +187,7 @@ PreToolUse 放行条件：活跃 CHG 在 `task.md` 存在，详情文件存在�
 
 ## V (Verify)
 
-先运行验证、读取结果，再声称完成。验证遵循 `superpowers:verification-before-completion` 的 IDENTIFY → RUN → READ → VERIFY → CLAIM；无测试框架时用可复现的手动命令或浏览器验证。
+先运行验证、读取结果，再声称完成。验证遵循 `superpowers:verification-before-completion` 的 IDENTIFY → RUN → READ → VERIFY → CLAIM；无测试框架时用可复现的手动命令或浏览器验证。验证失败必须修复后重新验证，不跳过。
 
 验证通过**不直接收口**——先完成下面的 **R（审计）** 步骤，再派 close-chg 一并写 VERIFIED + REVIEWED + 归档。R 跑完后的收尾合并操作是派 `close-chg`，必带 `verification-confirmed: true`、`complete-open-tasks: true`、`review-confirmed: true`、`review-source`、`review-findings`（P0/P1/P2/P3 计数 + 各自处置 wikilink）、`verify-summary`、`implementation-notes`（per-task 实施说明）、`walkthrough-summary`；完整字段模板见 Skill(paceflow:artifact-management)「最小字段模板」。
 
@@ -233,9 +223,16 @@ artifact writer 会同时写：
    - **P0 / P1** → 复核为真后开 HOTFIX（`create-chg --type hotfix`）修，或判定不修则记 won't-fix finding（`record-finding` 带 `status: rejected` + `rejection-reason`，落 `[-]`，不注入 SessionStart）；
    - **P2 / P3** → 派 `record-finding` 进 backlog：actionable 待修留 `[ ]`（默认），已决定不修标 `[-]`（won't-fix，同样 `status: rejected` + `rejection-reason`）；
    - **迭代闸**：审计-findings 生出的 HOTFIX **默认不自动重审**（深度=1），防"审计→修→再审"无止境递归。
+   - **knowledge 评估**：每条 `record-finding` 后评估该 finding 结论是否跨项目通用；通用则派 `Skill(paceflow:pace-knowledge)` 按「Findings → Knowledge 提取 SOP」沉淀到 `knowledge/`。主 session 给通用性初判 + 沉淀裁决，artifact-writer 只产出评估信号、不自主沉淀。
 5. **派 close-chg**：findings 路由完成后，派上方 V 段的 `close-chg`（含 `review-confirmed: true` / `review-source` / `review-findings`）一把梭折叠 VERIFIED + REVIEWED + 归档；只想记录审计暂不归档时，才派 `update-chg action=review`。
 
 > **阻断语义**：close 前必须"审计这步跑过并记录 findings 处置"（阻断-on-步骤），但绝不要求"P0/P1 修完"才放行 close（不阻断-on-结论）。审计挖出 5 个 P0 全部路由成 won't-fix，照样满足 REVIEWED。
+
+---
+
+## Corrections 捕获
+
+被用户纠正（"不对" / "别这样" / "错了" / "我说的是" 等）时，与 PACE 阶段正交、随时触发：先判断该纠正是跨项目通用经验还是仅限当前项目，再派 `artifact-writer record-correction` 写入 `changes/corrections/<id>.md` 与 `corrections.md` 索引。必填 `trigger-quote` / `wrong-behavior` / `correct-behavior` / `trigger-scenario` / `root-cause`，并二选一提供 `knowledge-link: [[note]]`（通用：先在 `knowledge/` 选定或新建笔记拿 wikilink）或 `project-scope: project-only`（仅本项目）。禁止仅口头承认而不持久化。双写 SOP 与通用性评估详见 Skill(paceflow:pace-knowledge)「Corrections 双写流程」。
 
 ---
 
@@ -246,16 +243,3 @@ artifact writer 会同时写：
 归档不是移动详情内容，也不是主 session 上移 `<!-- ARCHIVE -->`。归档由 artifact writer 完成：
 - 详情 frontmatter `status: archived` + `archived-date`
 - `task.md` 索引行移动到 ARCHIVE 下方
-
----
-
-## 豁免与适用
-
-| 使用 PACE | 跳过 PACE |
-|-----------|-----------|
-| 多步骤任务（3+ 步骤） | 简单问答 |
-| 研究型任务 | 单文件小修改 |
-| 构建/创建项目 | 快速查询 |
-| 涉及多次工具调用 | 纯文档/注释 |
-
-豁免不允许覆盖 hook 已经识别为 PACE 项目的强制规则；被 hook deny 时按提示派 artifact writer 修复 artifact 状态。

@@ -34,7 +34,7 @@ pace-bridge 不直接 Edit `task.md`。桥接的唯一写入路径是派 `artifa
 ```bash
 node "<skill-root>/../../hooks/set-project-root.js" --mode independent
 node "<skill-root>/../../hooks/set-artifact-root.js" --choice local|vault
-node "<skill-root>/../../hooks/reserve-artifact-id.js" --operation create-chg
+node "<skill-root>/../../hooks/reserve-artifact-id.js" --operation create-chg --cwd <项目 cwd>
 node "<skill-root>/../../hooks/sync-plan.js" --plan "<已桥接的 plan 绝对路径>"
 ```
 
@@ -64,25 +64,25 @@ node "<skill-root>/../../hooks/sync-plan.js" --plan "<已桥接的 plan 绝对�
 每个 CHG 派遣前先预留编号。优先使用 SessionStart / PreToolUse 提示中的 reserve helper 完整命令；如果上下文没有完整命令，按上方 helper 命令来源从当前 skill 根目录拼出同版本绝对路径。
 
 ```bash
-node "<SessionStart/PreToolUse 输出的 reserve-artifact-id.js 绝对路径>" --operation create-chg
+node "<SessionStart/PreToolUse 输出的 reserve-artifact-id.js 绝对路径>" --operation create-chg --cwd <项目 cwd>
 # 若没有 hook 输出但本 skill 已加载：
-node "<skill-root>/../../hooks/reserve-artifact-id.js" --operation create-chg
+node "<skill-root>/../../hooks/reserve-artifact-id.js" --operation create-chg --cwd <项目 cwd>
 ```
 
 如果当前桥接出的单元是 HOTFIX，预留时必须声明类型：
 
 ```bash
-node "<SessionStart/PreToolUse 输出的 reserve-artifact-id.js 绝对路径>" --operation create-chg --type hotfix
+node "<SessionStart/PreToolUse 输出的 reserve-artifact-id.js 绝对路径>" --operation create-chg --cwd <项目 cwd> --type hotfix
 # 若没有 hook 输出但本 skill 已加载：
-node "<skill-root>/../../hooks/reserve-artifact-id.js" --operation create-chg --type hotfix
+node "<skill-root>/../../hooks/reserve-artifact-id.js" --operation create-chg --cwd <项目 cwd> --type hotfix
 ```
 
 同一 session 默认复用尚未消费的 `create-chg` reservation；如果已预留过普通 CHG 但当前单元应是 HOTFIX，或确实需要另一个新编号，加 `--new`：
 
 ```bash
-node "<SessionStart/PreToolUse 输出的 reserve-artifact-id.js 绝对路径>" --operation create-chg --type hotfix --new
+node "<SessionStart/PreToolUse 输出的 reserve-artifact-id.js 绝对路径>" --operation create-chg --cwd <项目 cwd> --type hotfix --new
 # 若没有 hook 输出但本 skill 已加载：
-node "<skill-root>/../../hooks/reserve-artifact-id.js" --operation create-chg --type hotfix --new
+node "<skill-root>/../../hooks/reserve-artifact-id.js" --operation create-chg --cwd <项目 cwd> --type hotfix --new
 ```
 
 把 helper 输出的 `artifact_dir` / `operation` / `execution-context` / `reserved-id` / `reserved-file-prefix` 放到 Agent prompt 顶部，再追加：
@@ -99,7 +99,7 @@ technical-decision: <关键设计决策和取舍>
 
 每个任务自包含目标与验收标准，让后续执行者不回读 plan 也能据此执行。若需要生成多个 CHG，标题应体现各自的闭环范围，如“数据结构/迁移”“后端接口”“前端调用”“文档配置”。
 
-**批量创建（batch create CHG，推荐用于一次桥接整个 plan）**：当一个 plan 按闭环边界拆成 N 个 CHG 时，一次预留 N 个连号、一次 batch create，而非逐个执行完一个再建下一个（后者会把后续阶段的规划只留在 session 上下文，compact 或中断即丢失）。先 `reserve --operation create-chg --count N` 取 N 个连号 `reserved-id`，再组织一个 batch create prompt（共享头部 + N 个 `--- CHG i/N ---` 块）：
+**批量创建（batch create CHG，推荐用于一次桥接整个 plan）**：当一个 plan 按闭环边界拆成 N 个 CHG 时，一次预留 N 个连号、一次 batch create，而非逐个执行完一个再建下一个（后者会把后续阶段的规划只留在 session 上下文，compact 或中断即丢失）。先 `reserve --operation create-chg --cwd <项目 cwd> --count N` 取 N 个连号 `reserved-id`，再组织一个 batch create prompt（共享头部 + N 个 `--- CHG i/N ---` 块）：
 
 ```text
 artifact_dir: <hook 解析出的 artifact 目录>

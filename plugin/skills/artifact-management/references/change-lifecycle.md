@@ -21,25 +21,25 @@ changes/hotfix-yyyymmdd-nn.md
 ID 由 hook 原子预留。主路径是在派 `artifact-writer create-chg` 前先运行 SessionStart / PreToolUse 提示中的 reserve helper 完整命令；如果上下文没有完整命令，以当前 skill 根目录（而非本 `references/` 目录）为基准拼出同版本绝对路径 `../../hooks/reserve-artifact-id.js`。helper 路径以 hook 命令或 skill 根目录为准，不扫描 `~/.claude/plugins/cache` 猜版本：
 
 ```bash
-node "<SessionStart/PreToolUse 输出的 reserve-artifact-id.js 绝对路径>" --operation create-chg
+node "<SessionStart/PreToolUse 输出的 reserve-artifact-id.js 绝对路径>" --operation create-chg --cwd <项目 cwd>
 # 若没有 hook 输出但本 skill 已加载：
-node "<skill-root>/../../hooks/reserve-artifact-id.js" --operation create-chg
+node "<skill-root>/../../hooks/reserve-artifact-id.js" --operation create-chg --cwd <项目 cwd>
 ```
 
 HOTFIX 预留必须加类型：
 
 ```bash
-node "<SessionStart/PreToolUse 输出的 reserve-artifact-id.js 绝对路径>" --operation create-chg --type hotfix
+node "<SessionStart/PreToolUse 输出的 reserve-artifact-id.js 绝对路径>" --operation create-chg --cwd <项目 cwd> --type hotfix
 # 若没有 hook 输出但本 skill 已加载：
-node "<skill-root>/../../hooks/reserve-artifact-id.js" --operation create-chg --type hotfix
+node "<skill-root>/../../hooks/reserve-artifact-id.js" --operation create-chg --cwd <项目 cwd> --type hotfix
 ```
 
 同一 session 默认复用尚未消费的 `create-chg` reservation。若已预留普通 CHG 后要创建 HOTFIX，或确实需要第二个新编号，加 `--new`：
 
 ```bash
-node "<SessionStart/PreToolUse 输出的 reserve-artifact-id.js 绝对路径>" --operation create-chg --type hotfix --new
+node "<SessionStart/PreToolUse 输出的 reserve-artifact-id.js 绝对路径>" --operation create-chg --cwd <项目 cwd> --type hotfix --new
 # 若没有 hook 输出但本 skill 已加载：
-node "<skill-root>/../../hooks/reserve-artifact-id.js" --operation create-chg --type hotfix --new
+node "<skill-root>/../../hooks/reserve-artifact-id.js" --operation create-chg --cwd <项目 cwd> --type hotfix --new
 ```
 
 再把 helper 输出的 `artifact_dir` / `operation` / `execution-context` / `reserved-id` / `reserved-file-prefix` 原样加入 Agent prompt。artifact writer 必须使用该预留编号；artifact 文件统一由 artifact writer 写入。
@@ -111,4 +111,4 @@ Stop hook 会阻止 completed 未 verified、verified 未归档、索引/详情�
 - 源自 finding 的变更：`create-chg` 输入带 `related-finding`，agent 在详情中保留关联。
 - 新 finding：派 `record-finding` 写 `changes/findings/<id>.md` 和 `findings.md` 摘要索引。
 - 用户纠正：派 `record-correction` 写 `changes/corrections/<id>.md` 和 `corrections.md` 摘要索引。
-- 跨项目通用经验：再用 `paceflow:pace-knowledge` 沉淀到 `knowledge/`。
+- 跨项目通用经验：agent 写入 finding / correction 详情后，主 session **主动评估**其通用性（不被动等用户要求），通用则用 `paceflow:pace-knowledge` 按「Findings → Knowledge 提取 SOP」沉淀到 `knowledge/`。

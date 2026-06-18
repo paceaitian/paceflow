@@ -141,7 +141,7 @@ sources:
 2. **检查 knowledge/ 是否已有同主题笔记**：正确做法是先使用当前环境可用的只读搜索工具检索 `knowledge/` 目录中的标题和标签；专用搜索工具不可用时，用只读 Bash `rg` / `grep` / `find` fallback。搜索失败只影响检索方式，不代表知识库流程失败。
 3. **已有** → Edit 追加新内容到 `## 详情` section，更新 `updated` 日期和 `sources`
 4. **未有** → Write 创建新笔记，使用 knowledge/ 模板，`status: concluded`
-5. **关联 finding**：`record-finding` 当前不维护 knowledge frontmatter 字段，且当前没有 `modify-finding` 指令；finding 详情创建后保持不变（`update-chg` 不修改 finding 详情）。通用知识的反向链接优先写在 knowledge 笔记正文引用原 finding；若确实需要补充 artifact 记录，派 `artifact-writer record-finding` 新建一条补充 finding，说明与原 finding / knowledge 笔记的关系。
+5. **关联 finding**：`record-finding` 不维护 knowledge frontmatter 字段（knowledge 反向链接优先写在 knowledge 笔记正文引用原 finding）。finding 详情可经 `update-finding` 维护——`append` 向正文**末尾追加**、`status` 迁移状态、`change-link` / `merged-into` 补关联（既有正文只可追加、不可改写；详见 `agent-references/instructions/update-finding.md`）。需要补充「与 knowledge 笔记的关系」等正文增量时，派 `artifact-writer update-finding append=<增量>` 追加到原 finding，无需另建补充 finding。
 
 > 提取的知识必须自包含——不依赖原 finding 的上下文就能理解。摘要是结论，详情是完整推理。
 

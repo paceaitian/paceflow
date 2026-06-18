@@ -122,3 +122,13 @@ frontmatter 只含 `date` / `schema-version` 两个 key（spec §2.3 封闭合�
 - 派生 title 失败（wrong-behavior 全为标点/无实词）→ 报告 `format-violation: cannot derive title`
 - corrections.md 缺失 → 用 spec §5.6.5 模板 Write 新建（不算错误）
 - `$ARTIFACT_DIR/changes` 不存在 → `not-pace-project`
+
+## knowledge 评估信号（报告内附加，给信号不给结论）
+
+correction 的通用性已由主 session 在派遣前二选一（`knowledge-link` 通用 / `project-scope` 仅本项目）。写入成功后，在 artifact-writer 报告**末尾**附一个 `### knowledge 评估信号` 子段（报告内 H3），轻量复核该前置判断（本 agent 已预加载 `pace-knowledge` skill）：
+
+1. **一致性复核**：基于 `wrong-behavior` / `root-cause` 判断本次纠正像通用模式（AI 验证纪律、决策偏差等）还是项目特有，与输入的 `knowledge-link` / `project-scope` 取向是否一致——不一致（如 `project-scope` 但根因像通用）则提示主 session 复核。
+2. **同主题检索**：`knowledge-link` 已给时只读确认该笔记主题匹配；`project-scope` 时只读检索 `knowledge/` 列同主题笔记（无 vault 路径或检索失败如实说明，不阻塞）。
+3. **一句建议**：「前置判断一致 / 疑似漏沉淀建议复核 / 已链接笔记匹配」三选一。
+
+**边界（钉死）**：本 agent 只产出**信号**，不改主 session 的二选一判断、不写 / 改 `knowledge/` 笔记、不越 CRUD 职责。该信号为可选附加，不影响 correction 写入的 SUCCESS 判定。

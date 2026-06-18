@@ -3377,7 +3377,7 @@ test('skills 明确 HOTFIX reserve helper 用法与 --new 边界', () => {
   ];
   for (const rel of files) {
     const text = fs.readFileSync(path.join(repoRoot, rel), 'utf8');
-    assert.ok(text.includes('--operation create-chg --type hotfix'), `${rel} 应明确 HOTFIX 预留命令`);
+    assert.ok(text.includes('--operation create-chg') && text.includes('--type hotfix'), `${rel} 应明确 HOTFIX 预留命令（--cwd 可内联其间）`);
     assert.ok(text.includes('--type hotfix --new'), `${rel} 应明确 HOTFIX 新编号复用边界`);
   }
 });

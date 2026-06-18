@@ -428,6 +428,7 @@ if (warnings.length > 0) {
       // HOTFIX-20260314-02: 场景感知前缀——区分"用户决策"/"继续执行"/"收尾修复"
       const hasUserActionWarning = warningTypes.includes('user-action');
       const hasExecutionWarning = warningTypes.includes('execution');
+      const hasVerifyWarning = warningTypes.includes('verify');
       let prefix;
       if (hasUserActionWarning && hasExecutionWarning) {
         prefix = 'PACE 检查未通过，请继续执行任务并处理以下问题；其中部分问题需要用户决策：';
@@ -435,6 +436,10 @@ if (warnings.length > 0) {
         prefix = 'PACE 检查未通过，以下问题需要用户决策：';
       } else if (hasExecutionWarning) {
         prefix = 'PACE 检查未通过，请继续执行任务并处理以下问题：';
+      } else if (hasVerifyWarning) {
+        // N07：verify 警告正文要求去运行验证 / 派 review agent 做审计（要执行动作），
+        //   不能落默认前缀「不要执行新任务」——单列一档，与「去验证 / 审计收尾」语义一致。
+        prefix = 'PACE 检查未通过，请先完成验证 / 审计收尾，再处理以下检查项：';
       } else {
         prefix = 'PACE 完成度检查未通过。请仅修复以下检查项，不要执行新任务：';
       }

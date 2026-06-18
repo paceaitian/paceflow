@@ -129,6 +129,6 @@
   },
   "RAW_RESERVATION_MISSING": {
     "decision": "deny",
-    "text": "artifact-writer 正在新建 changes/chg-20260504-99.md，但当前 session/agent 没有 hook 预留编号。\n请从主 session 运行 reserve-artifact-id helper，把 helper 输出放进 artifact-writer prompt 顶部后重派。\n不要让 agent 自行扫描索引分配 CHG/HOTFIX/CORRECTION 编号。"
+    "text": "artifact-writer 正在新建 changes/chg-20260504-99.md，但当前 session/agent 没有 hook 预留编号。\n请先在主 session 运行 Bash: node \"<HOOKS>/reserve-artifact-id.js\" --operation create-chg --cwd \"<DIR>\"，把 helper 输出（reserved-id / reserved-file-prefix）放进 artifact-writer prompt 顶部后重派。\n不要让 agent 自行扫描索引分配 CHG/HOTFIX/CORRECTION 编号。"
   }
 }

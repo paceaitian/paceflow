@@ -525,7 +525,7 @@ paceUtils.withStdinParsed((stdin) => {
               const reason = [
                 `batch create CHG 中 reserved-id ${badId} 没有匹配的 hook 预留（无效或已过期）。`,
                 FORMAT_SNIPPETS.skillRef,
-                `请先在主 session 运行 Bash: node "${paceUtils.RESERVE_ARTIFACT_ID_SCRIPT}" --operation create-chg --count ${batchBlocks.blocks.length}，把输出的每个 reserved-id 原样放进对应 --- CHG i/N --- 块后重派；不要手写或复用旧 session 的 reserved-id。`,
+                `请先在主 session 运行 Bash: node "${paceUtils.RESERVE_ARTIFACT_ID_SCRIPT}" --operation create-chg --count ${batchBlocks.blocks.length} --cwd "${cwd.replace(/\\/g, '/')}"，把输出的每个 reserved-id 原样放进对应 --- CHG i/N --- 块后重派；不要手写或复用旧 session 的 reserved-id。`,
               ].join('\n');
               emitDeny('DENY_AGENT_BATCH_RESERVED_MISMATCH', reason, {
                 agent: stdin.toolInput.subagent_type || stdin.toolInput.subagentType,
@@ -914,9 +914,10 @@ paceUtils.withStdinParsed((stdin) => {
           /^changes\/corrections\/correction-\d{4}-\d{2}-\d{2}-\d{2}-.+\.md$/i.test(artifactRelForMutation)
         );
         if (writeNeedsReservation && !reservation) {
+          const reserveOp = /^changes\/corrections\//i.test(artifactRelForMutation) ? 'record-correction' : 'create-chg';
           const reason = [
             `artifact-writer 正在新建 ${artifactRelForMutation}，但当前 session/agent 没有 hook 预留编号。`,
-            '请从主 session 运行 reserve-artifact-id helper，把 helper 输出放进 artifact-writer prompt 顶部后重派。',
+            `请先在主 session 运行 Bash: node "${paceUtils.RESERVE_ARTIFACT_ID_SCRIPT}" --operation ${reserveOp} --cwd "${cwd.replace(/\\/g, '/')}"，把 helper 输出（reserved-id / reserved-file-prefix）放进 artifact-writer prompt 顶部后重派。`,
             '不要让 agent 自行扫描索引分配 CHG/HOTFIX/CORRECTION 编号。'
           ].join('\n');
           emitDeny('DENY_ARTIFACT_RESERVATION_MISSING', reason, {

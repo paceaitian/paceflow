@@ -5,6 +5,7 @@ description: |
   walkthrough / findings / corrections.md）和 changes/ 子目录详情文件的 CRUD。
   详细规范在 ${CLAUDE_PLUGIN_ROOT}/agent-references/artifact-writer-spec.md 与 ${CLAUDE_PLUGIN_ROOT}/agent-references/instructions/。
 tools: [Read, Write, Edit, Bash]
+skills: [pace-knowledge]
 model: sonnet
 effort: max
 maxTurns: 32

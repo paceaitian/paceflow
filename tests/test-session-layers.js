@@ -435,7 +435,7 @@ test('SL-20. 工作流入口含 finding/correction 场景 + 正向 framing（CHG
   const state = makeActiveState();
   const head = buildLayers(state, 'startup', paceUtils, 'core').l1head.join('\n');
   assert.ok(head.includes('finding/correction'), '工作流入口含 finding/correction 场景');
-  assert.ok(head.includes('自动解析') && head.includes('--cwd'), '正向 framing（自动解析 + --cwd）');
+  assert.ok(head.includes('--cwd') && head.includes('锚定'), '正向 framing（默认带 --cwd 锚定）');
   assert.ok(!head.includes('不要搜索') && !head.includes('不要传'), '无负向 framing（不要搜索/不要传）');
 });
 

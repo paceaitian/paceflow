@@ -22,8 +22,8 @@ Helper 命令来源顺序的权威定义见 Skill(paceflow:pace-workflow)「Help
 
 ```bash
 node "<skill-root>/../../hooks/set-artifact-root.js" --choice local|vault
-node "<skill-root>/../../hooks/reserve-artifact-id.js" --operation create-chg
-node "<skill-root>/../../hooks/reserve-artifact-id.js" --operation record-correction
+node "<skill-root>/../../hooks/reserve-artifact-id.js" --operation create-chg --cwd <项目 cwd>
+node "<skill-root>/../../hooks/reserve-artifact-id.js" --operation record-correction --cwd <项目 cwd>
 ```
 
 权威规范：
@@ -90,7 +90,7 @@ CHG/HOTFIX 是连续执行、可验证、可关闭的最小变更单元，不是
 | 归档 CHG/HOTFIX | operation=`archive-chg`，target=`CHG-...`；已取消 CHG 也用此操作做取消归档 |
 | 最后任务验证审计后完成并归档 | operation=`close-chg`，target=`CHG-...`，需要 `verification-confirmed: true` + `complete-open-tasks: true` + `review-confirmed: true`（附 review-source / review-findings）+ `implementation-notes`（per-task 实施说明） |
 | 记录 finding | operation=`record-finding` |
-| 记录 correction | 先运行 reserve helper `--operation record-correction`，再派 operation=`record-correction` 并带 `reserved-file-prefix` |
+| 记录 correction | 先运行 reserve helper `--operation record-correction --cwd <项目 cwd>`，再派 operation=`record-correction` 并带 `reserved-file-prefix` |
 | 重排索引（findings.md/corrections.md 活跃区改日期降序新→旧） | operation=`update-index`，target=`findings.md`/`corrections.md`，action=`reorder` |
 
 `action=approve` 只完成 C 阶段，CHG 仍是 ready/deferred，不能据此写项目文件；只有 `approve-and-start` 或将任务恢复为 `[/]` 后才进入 E 阶段。`[!]` 表示 blocked/deferred：允许 Stop，但 Stop 会显示人可见提醒，恢复前不能继续写项目文件。
@@ -341,10 +341,10 @@ action: reorder
 
 ## 编号规范
 
-- `CHG-YYYYMMDD-NN` / `HOTFIX-YYYYMMDD-NN`：由 hook 原子预留。主路径是在派 `artifact-writer create-chg` 前先运行 SessionStart / PreToolUse 提示中的 reserve helper 完整命令；如果上下文没有完整命令，按上方 helper 命令来源从当前 skill 根目录拼出同版本绝对路径。普通 CHG 用 `--operation create-chg`；HOTFIX 用 `--operation create-chg --type hotfix`；批量创建一个 change-set 的 N 个 CHG 用 `--count N` 一次预留 N 个连号（仅 create-chg 支持）。`create-chg --type` 只支持 `change` / `hotfix`；finding/research 沉淀走 `record-finding`。同一 session 默认复用尚未消费的 `create-chg` reservation，若已预留普通 CHG 后要改建 HOTFIX，或确实要第二个新编号，加 `--new`。再把 helper 输出的 `reserved-id` / `reserved-file-prefix` 原样写入 Agent prompt。
+- `CHG-YYYYMMDD-NN` / `HOTFIX-YYYYMMDD-NN`：由 hook 原子预留。主路径是在派 `artifact-writer create-chg` 前先运行 SessionStart / PreToolUse 提示中的 reserve helper 完整命令；如果上下文没有完整命令，按上方 helper 命令来源从当前 skill 根目录拼出同版本绝对路径。普通 CHG 用 `--operation create-chg --cwd <项目 cwd>`；HOTFIX 用 `--operation create-chg --cwd <项目 cwd> --type hotfix`；批量创建一个 change-set 的 N 个 CHG 用 `--count N` 一次预留 N 个连号（仅 create-chg 支持）。`create-chg --type` 只支持 `change` / `hotfix`；finding/research 沉淀走 `record-finding`。同一 session 默认复用尚未消费的 `create-chg` reservation，若已预留普通 CHG 后要改建 HOTFIX，或确实要第二个新编号，加 `--new`。再把 helper 输出的 `reserved-id` / `reserved-file-prefix` 原样写入 Agent prompt。
 - `T-NNN`：由 artifact writer 为当前 CHG/HOTFIX 分配的局部编号，写入 `changes/<id>.md` 的 `## 任务清单`；不同 CHG 可以重复 `T-001`，后续操作用 `target + task-id` 定位。
 - `FINDING-YYYY-MM-DD-slug`：详情在 `changes/findings/`。
-- `CORRECTION-YYYY-MM-DD-NN`：由 hook 在派 `record-correction` 前原子预留；frontmatter 稳定 ID；详情文件名和 wikilink 追加 slug，格式为 `changes/corrections/correction-yyyy-mm-dd-nn-slug.md`。先按 helper 命令来源运行 `reserve-artifact-id.js --operation record-correction`，再把 helper 输出的 `reserved-file-prefix` 原样写入 Agent prompt。
+- `CORRECTION-YYYY-MM-DD-NN`：由 hook 在派 `record-correction` 前原子预留；frontmatter 稳定 ID；详情文件名和 wikilink 追加 slug，格式为 `changes/corrections/correction-yyyy-mm-dd-nn-slug.md`。先按 helper 命令来源运行 `reserve-artifact-id.js --operation record-correction --cwd <项目 cwd>`，再把 helper 输出的 `reserved-file-prefix` 原样写入 Agent prompt。
 
 编号一律来自 helper 预留；`task.md` 只保留索引，无内嵌详情区可供推导。
 
@@ -357,33 +357,33 @@ action: reorder
 先预留编号：
 
 ```bash
-node "<SessionStart/PreToolUse 输出的 reserve-artifact-id.js 绝对路径>" --operation create-chg
+node "<SessionStart/PreToolUse 输出的 reserve-artifact-id.js 绝对路径>" --operation create-chg --cwd <项目 cwd>
 # 若没有 hook 输出但本 skill 已加载：
-node "<skill-root>/../../hooks/reserve-artifact-id.js" --operation create-chg
+node "<skill-root>/../../hooks/reserve-artifact-id.js" --operation create-chg --cwd <项目 cwd>
 ```
 
 HOTFIX 预留：
 
 ```bash
-node "<SessionStart/PreToolUse 输出的 reserve-artifact-id.js 绝对路径>" --operation create-chg --type hotfix
+node "<SessionStart/PreToolUse 输出的 reserve-artifact-id.js 绝对路径>" --operation create-chg --cwd <项目 cwd> --type hotfix
 # 若没有 hook 输出但本 skill 已加载：
-node "<skill-root>/../../hooks/reserve-artifact-id.js" --operation create-chg --type hotfix
+node "<skill-root>/../../hooks/reserve-artifact-id.js" --operation create-chg --cwd <项目 cwd> --type hotfix
 ```
 
 若同一 session 已有未消费的普通 CHG reservation，但现在要创建 HOTFIX，或确实要新编号：
 
 ```bash
-node "<SessionStart/PreToolUse 输出的 reserve-artifact-id.js 绝对路径>" --operation create-chg --type hotfix --new
+node "<SessionStart/PreToolUse 输出的 reserve-artifact-id.js 绝对路径>" --operation create-chg --cwd <项目 cwd> --type hotfix --new
 # 若没有 hook 输出但本 skill 已加载：
-node "<skill-root>/../../hooks/reserve-artifact-id.js" --operation create-chg --type hotfix --new
+node "<skill-root>/../../hooks/reserve-artifact-id.js" --operation create-chg --cwd <项目 cwd> --type hotfix --new
 ```
 
 Correction 预留：
 
 ```bash
-node "<SessionStart/PreToolUse 输出的 reserve-artifact-id.js 绝对路径>" --operation record-correction
+node "<SessionStart/PreToolUse 输出的 reserve-artifact-id.js 绝对路径>" --operation record-correction --cwd <项目 cwd>
 # 若没有 hook 输出但本 skill 已加载：
-node "<skill-root>/../../hooks/reserve-artifact-id.js" --operation record-correction
+node "<skill-root>/../../hooks/reserve-artifact-id.js" --operation record-correction --cwd <项目 cwd>
 ```
 
 把 helper 输出放在 prompt 顶部，派遣字段按上方「最小字段模板」段组织——create / 批量创建 / 批准 / 批准并开始 / 恢复 / close / verify / review / archive / record 系全量模板见该段，本节不再复制。

@@ -154,8 +154,8 @@ if (rootChoicePending && !fs.existsSync(path.join(artDir, 'task.md'))) {
     '首次写代码或派 artifact-writer 时，PreToolUse 会要求选择 artifact root；选择前不会创建 .pace/、changes/ 或 Obsidian 空项目目录。',
     `若当前子目录应作为独立 PaceFlow 项目，先运行：node "${paceUtils.SET_PROJECT_ROOT_SCRIPT}" --mode independent`,
     `若用户已明确选择 vault/local，先从当前项目 cwd 运行：node "${paceUtils.SET_ARTIFACT_ROOT_SCRIPT}" --choice local 或 --choice vault`,
-    `配置写入后再运行：node "${paceUtils.RESERVE_ARTIFACT_ID_SCRIPT}" --operation create-chg`,
-    'reserve helper 从当前项目 cwd 和 .pace/artifact-root 自动解析 artifact_dir；自动化场景用 --cwd 指定项目 cwd 即可。',
+    `配置写入后再运行：node "${paceUtils.RESERVE_ARTIFACT_ID_SCRIPT}" --operation create-chg --cwd "${cwd.replace(/\\/g, '/')}"`,
+    'reserve helper 从 --cwd 指定的项目 cwd 和 .pace/artifact-root 解析 artifact_dir；上面命令已内联 --cwd。Claude 主 session 的 Bash cwd 会在命令间漂移，务必带 --cwd 锚定，否则 reservation 可能写错 runtime（后续 artifact-writer 误报「无效或已过期」）。',
     '',
   ].join('\n') + '\n';
 }

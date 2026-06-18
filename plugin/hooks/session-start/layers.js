@@ -283,8 +283,8 @@ function renderWorkflowEntry(state, eventType, paceUtils) {
     '涉及 artifact/CHG 字段、任务状态、批准、验证、归档、记录调研/纠正时，再调用 Skill(paceflow:artifact-management)。',
     `artifact-root helper: node "${paceUtils.SET_ARTIFACT_ROOT_SCRIPT}" --choice local 或 --choice vault`,
     `独立子项目 helper: node "${paceUtils.SET_PROJECT_ROOT_SCRIPT}" --mode independent`,
-    `预留编号 helper: node "${paceUtils.RESERVE_ARTIFACT_ID_SCRIPT}" --operation create-chg`,
-    'reserve helper 从当前项目 cwd 和 .pace/artifact-root 自动解析 artifact_dir；自动化场景用 --cwd 指定项目 cwd 即可。',
+    `预留编号 helper: node "${paceUtils.RESERVE_ARTIFACT_ID_SCRIPT}" --operation create-chg --cwd "${state.cwd.replace(/\\/g, '/')}"`,
+    'reserve helper 从 --cwd 指定的项目 cwd 和 .pace/artifact-root 解析 artifact_dir；上面命令已内联 --cwd。Claude 主 session 的 Bash cwd 会在命令间漂移，务必带 --cwd 锚定，否则 reservation 可能写错 runtime（后续 artifact-writer 误报「无效或已过期」）。',
   ];
   // v5 布局一句性提示（CHG-20260612-02）：不催办迁移、不门控；首个 create-chg 建出 changes/ 后自动消失。
   if (v5MigrationInfo.detected) {
@@ -741,6 +741,7 @@ function renderActiveChangeSummary(state, paceUtils) {
   if (omittedChg > 0) {
     out += `（另有 ${omittedChg} 个活跃 CHG 未在摘要展开，Read task.md 查看全部）\n`;
   }
+  out += `状态符号：task=[ ]未开始 [/]进行中 [x]完成 [!]暂停/阻塞 [-]跳过；approved/verified/reviewed 为 C/V/R 阶段标记（完整图例见 Skill(paceflow:artifact-management)）。\n`;
   out += `继续、恢复或收口已有 CHG 前，先 Read 对应 changes/<id>.md，确认任务清单、实施详情和工作记录；本摘要只用于定位，不替代 CHG 详情。\n`;
   out += '\n';
   return out;

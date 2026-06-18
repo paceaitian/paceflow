@@ -90,3 +90,13 @@ body: <完整 Markdown 正文>
 - `$ARTIFACT_DIR/changes` 不存在 → `not-pace-project`
 
 > **§边界 vs §9 通用验证规则关系**：本节是 lex specialis（特殊条款），优先级高于上层 `../artifact-writer-spec.md` §9 通用 wikilink 强校验。merges / related-changes 字段允许"warn but don't block"，其他字段仍按 §9 通用强校验。
+
+## knowledge 评估信号（报告内附加，给信号不给结论）
+
+写入 finding 详情成功后，在 artifact-writer 报告**末尾**附一个 `### knowledge 评估信号` 子段（报告内 H3，不另起顶层 H2），供主 session 裁决是否沉淀到 `knowledge/`（本 agent 已预加载 `pace-knowledge` skill，按其「Findings → Knowledge 提取 SOP」检索 vault 根 `knowledge/`）：
+
+1. **通用性初判**：基于 `body` 判断该结论跨项目通用（Hook I/O 协议、AI 验证纪律、路径处理等）还是项目特有——一句初判 + 一句依据。
+2. **同主题检索**：只读检索 `knowledge/` 列同主题已有笔记（无 vault 路径或检索失败如实说明，不阻塞）。
+3. **一句建议**：「建议沉淀 / 已有 [[note]] 可追加 / 项目特有不沉淀」三选一。
+
+**边界（钉死）**：本 agent 只产出**信号**，不做沉淀决策、不写 / 改 `knowledge/` 笔记、不越 CRUD 职责；是否沉淀及沉淀到哪条笔记由主 session 用完整 CHG 上下文裁决。该信号为可选附加，不影响 finding 写入的 SUCCESS 判定（检索失败照常 SUCCESS，信号段注明检索未完成即可）。

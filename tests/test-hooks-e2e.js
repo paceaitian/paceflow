@@ -587,6 +587,17 @@ test('STOP-cs5. deferred + change-set 提醒按 CHG-ID/seq 升序展示（batch 
   assert.ok(!msg.includes('5/5, 4/5, 3/5, 2/5'), 'change-set seqs 不应为倒序');
 });
 
+test('N07. Stop verify 警告用专属前缀（completed 未验证 → 「请先完成验证 / 审计收尾」，不落「不要执行新任务」）', () => {
+  const dir = makeV6Project('stop-verify-prefix', {
+    indexMark: '[x]',
+    detail: chgDetail({ status: 'completed', task: '[x]', approved: true, verified: false }),
+  });
+  const r = runHook('stop.js', { cwd: dir });
+  assert.strictEqual(r.code, 2, 'completed 未验证应 Stop BLOCK（exit 2）');
+  assert.ok(r.stderr.includes('请先完成验证 / 审计收尾'), 'verify 警告应用专属前缀');
+  assert.ok(!r.stderr.includes('请仅修复以下检查项，不要执行新任务'), 'verify 警告不应落默认前缀「不要执行新任务」');
+});
+
 test('2a. SessionStart CHG 执行上下文按详情 pending T-NNN 提示', () => {
   const dir = makeV6Project('ss-v6-detail-pending', {
     indexMark: '[/]',
@@ -1938,7 +1949,7 @@ test('9c3. SessionStart 首次启用只提示 skill，不询问、不自动创�
 	  assert.ok(r.stdout.includes('Skill(paceflow:pace-workflow)'), 'SessionStart 应提示主 session 先读取 Paceflow workflow skill');
 	  assert.ok(r.stdout.includes('set-artifact-root.js'), '首次 root-choice 提示也应给出 artifact-root helper 绝对路径');
 	  assert.ok(r.stdout.includes('reserve-artifact-id.js'), '首次 root-choice 提示也应给出当前版本 reserve helper 绝对路径');
-	  assert.ok(r.stdout.includes('自动解析') && r.stdout.includes('--cwd'), '首次 root-choice 用正向 framing 引导 reserve helper（自动解析 + --cwd，不搜旧 plugin cache）');
+	  assert.ok(r.stdout.includes('--cwd') && r.stdout.includes('锚定'), '首次 root-choice 用正向 framing 引导 reserve helper（默认带 --cwd 锚定，不搜旧 plugin cache）');
 	  assert.strictEqual(r.stderr, '', '非 git 项目不应泄漏 git fatal stderr');
   assert.ok(!fs.existsSync(path.join(dir, '.pace')), '选择前 SessionStart 不应创建 .pace 运行态目录');
   assert.ok(!fs.existsSync(path.join(dir, 'changes')), '选择前不应在本地懒创建 changes/');
@@ -4234,6 +4245,155 @@ test('9hc0g. artifact-writer 写 C/E 阶段 artifact 不被项目执行 gate 自
   assert.strictEqual(e.code, 0);
   assert.ok(!e.stdout.includes('"deny"'));
   assert.ok(!e.stdout.includes('E 阶段未就绪'));
+});
+
+test('9hc-corr-fields1. record-correction 缺 trigger-quote → DENY（字段门，对齐 approve/review/close）', () => {
+  const dir = makeV6Project('agent-correction-missing-quote');
+  const r = runHook('pre-tool-use.js', {
+    cwd: dir,
+    stdin: {
+      session_id: 'sid-corr-missing-quote',
+      tool_name: 'Agent',
+      tool_input: {
+        subagent_type: 'paceflow:artifact-writer',
+        description: 'Record correction',
+        prompt: [
+          `artifact_dir: ${dir.replace(/\\/g, '/')}/`,
+          'operation: record-correction',
+          // 缺 trigger-quote
+          'wrong-behavior: 错误行为说明足够长',
+          'correct-behavior: 正确行为说明足够长',
+          'trigger-scenario: smoke',
+          'root-cause: test',
+          'project-scope: project-only',
+        ].join('\n'),
+      },
+    },
+  });
+  assert.strictEqual(r.code, 0);
+  assert.ok(r.stdout.includes('"deny"'));
+  assert.ok(r.stdout.includes('缺少必填字段'));
+  assert.ok(r.stdout.includes('trigger-quote'));
+  const reason = JSON.parse(r.stdout).hookSpecificOutput.permissionDecisionReason;
+  assert.ok(!reason.endsWith('\n'), 'record-correction 缺字段提示不应保留尾部空行');
+});
+
+test('9hc-corr-fields2. record-correction 缺 knowledge-link 和 project-scope 二选一 → DENY', () => {
+  const dir = makeV6Project('agent-correction-missing-dual');
+  const r = runHook('pre-tool-use.js', {
+    cwd: dir,
+    stdin: {
+      session_id: 'sid-corr-missing-dual',
+      tool_name: 'Agent',
+      tool_input: {
+        subagent_type: 'paceflow:artifact-writer',
+        description: 'Record correction',
+        prompt: [
+          `artifact_dir: ${dir.replace(/\\/g, '/')}/`,
+          'operation: record-correction',
+          'trigger-quote: 用户纠正了实现',
+          'wrong-behavior: 错误行为说明足够长',
+          'correct-behavior: 正确行为说明足够长',
+          'trigger-scenario: smoke',
+          'root-cause: test',
+          // 缺 knowledge-link 和 project-scope 两者
+        ].join('\n'),
+      },
+    },
+  });
+  assert.strictEqual(r.code, 0);
+  assert.ok(r.stdout.includes('"deny"'));
+  assert.ok(r.stdout.includes('knowledge-link 或 project-scope'));
+});
+
+test('9hc-corr-fields3. record-correction 五字段齐全 + project-scope → 不被字段门误拦（反向验证）', () => {
+  const dir = makeV6Project('agent-correction-fields-ok');
+  const r = runHook('pre-tool-use.js', {
+    cwd: dir,
+    stdin: {
+      session_id: 'sid-corr-fields-ok',
+      tool_name: 'Agent',
+      tool_input: {
+        subagent_type: 'paceflow:artifact-writer',
+        description: 'Record correction',
+        prompt: [
+          `artifact_dir: ${dir.replace(/\\/g, '/')}/`,
+          'operation: record-correction',
+          'trigger-quote: 用户纠正了实现',
+          'wrong-behavior: 错误行为说明足够长',
+          'correct-behavior: 正确行为说明足够长',
+          'trigger-scenario: smoke',
+          'root-cause: test',
+          'project-scope: project-only',
+        ].join('\n'),
+      },
+    },
+  });
+  assert.strictEqual(r.code, 0);
+  // 字段齐全：不被字段门拦（无 reserved-id 会被 reserve 门拦，但 reason 不含字段门文案）
+  assert.ok(!r.stdout.includes('缺少必填字段'));
+});
+
+test('9hc-corr-fields4. record-correction 只给 correct-behavior，wrong-behavior 仍被列 missing（子串污染回归护栏）', () => {
+  // 对抗回归：correct-behavior 含 "-behavior"、wrong-behavior 含 "behavior"，
+  // promptHasNonEmptyField 必须按字段名边界锚定，不能因 correct-behavior 存在就误判 wrong-behavior 存在。
+  const dir = makeV6Project('agent-correction-substr-pollution');
+  const r = runHook('pre-tool-use.js', {
+    cwd: dir,
+    stdin: {
+      session_id: 'sid-corr-substr',
+      tool_name: 'Agent',
+      tool_input: {
+        subagent_type: 'paceflow:artifact-writer',
+        description: 'Record correction',
+        prompt: [
+          `artifact_dir: ${dir.replace(/\\/g, '/')}/`,
+          'operation: record-correction',
+          'trigger-quote: 用户纠正了实现',
+          // 缺 wrong-behavior（只给 correct-behavior，验证子串不污染）
+          'correct-behavior: 正确行为说明足够长',
+          'trigger-scenario: smoke',
+          'root-cause: test',
+          'project-scope: project-only',
+        ].join('\n'),
+      },
+    },
+  });
+  assert.strictEqual(r.code, 0);
+  assert.ok(r.stdout.includes('"deny"'));
+  const reason = JSON.parse(r.stdout).hookSpecificOutput.permissionDecisionReason;
+  const firstLine = reason.split('\n')[0];
+  // wrong-behavior 必须在 missing 列表（无子串污染）；correct-behavior 已给，不应在 missing 行
+  assert.ok(firstLine.includes('wrong-behavior'), 'wrong-behavior 应被列为缺失（correct-behavior 存在不得污染）');
+  assert.ok(!firstLine.includes('correct-behavior'), 'correct-behavior 已给，不应出现在缺失行');
+});
+
+test('9hc-corr-fields5. record-correction 只给 knowledge-link 不给 project-scope → 不被字段门拦（二选一另一半）', () => {
+  const dir = makeV6Project('agent-correction-knowledge-link');
+  const r = runHook('pre-tool-use.js', {
+    cwd: dir,
+    stdin: {
+      session_id: 'sid-corr-knowledge-link',
+      tool_name: 'Agent',
+      tool_input: {
+        subagent_type: 'paceflow:artifact-writer',
+        description: 'Record correction',
+        prompt: [
+          `artifact_dir: ${dir.replace(/\\/g, '/')}/`,
+          'operation: record-correction',
+          'trigger-quote: 用户纠正了实现',
+          'wrong-behavior: 错误行为说明足够长',
+          'correct-behavior: 正确行为说明足够长',
+          'trigger-scenario: smoke',
+          'root-cause: test',
+          'knowledge-link: [[some-note]]',
+        ].join('\n'),
+      },
+    },
+  });
+  assert.strictEqual(r.code, 0);
+  // knowledge-link 满足二选一：不被字段门拦（reason 不含字段门文案）
+  assert.ok(!r.stdout.includes('缺少必填字段'));
 });
 
 test('9hc1. approve-and-start 缺 approval-confirmed → DENY', () => {
