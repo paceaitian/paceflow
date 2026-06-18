@@ -346,10 +346,10 @@ function reservationMatchesExplicit(reservation, explicit) {
   return true;
 }
 
-function artifactWriterCreateChgHint(artDir) {
+function artifactWriterCreateChgHint(artDir, cwd) {
   return [
     FORMAT_SNIPPETS.skillRef,
-    FORMAT_SNIPPETS.reserveHelper,
+    FORMAT_SNIPPETS.reserveHelper(cwd),
     '派 artifact-writer create-chg 时，Agent prompt 顶部必须包含：',
     `artifact_dir: ${displayDir(artDir)}`,
     'operation: create-chg',
@@ -367,7 +367,7 @@ function reservationRequiredReason(operation, artDir, reservation, cwd = process
   const lines = [
     `PACEflow 已为 ${operation} 预留唯一编号。本次 Agent 已被阻止，请重派 artifact-writer 并带上以下字段：`,
     FORMAT_SNIPPETS.skillRef,
-    operation === 'create-chg' ? FORMAT_SNIPPETS.reserveHelper : `后续可先运行 Bash: node "${RESERVE_ARTIFACT_ID_SCRIPT}" --operation record-correction 预留 correction 编号。`,
+    operation === 'create-chg' ? FORMAT_SNIPPETS.reserveHelper(cwd) : `后续可先运行 Bash: node "${RESERVE_ARTIFACT_ID_SCRIPT}" --operation record-correction --cwd "${String(cwd).replace(/\\/g, '/')}" 预留 correction 编号。`,
     `artifact_dir: ${displayDir(artDir)}`,
     `operation: ${operation}`,
   ];
@@ -379,11 +379,11 @@ function reservationRequiredReason(operation, artDir, reservation, cwd = process
   return lines.join('\n');
 }
 
-function reservationExplicitMissingReason(operation, explicit) {
+function reservationExplicitMissingReason(operation, explicit, cwd) {
   return [
     `artifact-writer prompt 的预留字段未匹配到 hook reservation：${explicit.id || explicit.fileRel || explicit.filePrefix || 'reserved fields'}。可能原因：(1) reservation 已过期（超 TTL）或已被消费；(2) reserved-id / reserved-file(-prefix) 与预留值不符。`,
     FORMAT_SNIPPETS.skillRef,
-    `排查：先核对 reserved-id 与最近一次 reserve 输出是否完全一致；reserved-file-prefix 应**原样保留** reserve 输出（含末尾 \`<slug>.md\` 占位——slug 由 artifact-writer 按 title 生成，caller 不要替换它）。只要前缀部分（到 \`<slug>\` 前）与预留一致即匹配。确认字段无误仍失败，再重新 reserve：Bash node "${RESERVE_ARTIFACT_ID_SCRIPT}" --operation ${operation}。`,
+    `排查：先核对 reserved-id 与最近一次 reserve 输出是否完全一致；reserved-file-prefix 应**原样保留** reserve 输出（含末尾 \`<slug>.md\` 占位——slug 由 artifact-writer 按 title 生成，caller 不要替换它）。只要前缀部分（到 \`<slug>\` 前）与预留一致即匹配。确认字段无误仍失败，再重新 reserve：Bash node "${RESERVE_ARTIFACT_ID_SCRIPT}" --operation ${operation} --cwd "${String(cwd).replace(/\\/g, '/')}"。`,
     '不要手写或复用旧 session 的 reserved-id。'
   ].join('\n');
 }

@@ -390,7 +390,7 @@ function artifactRootChoiceMessage(cwd) {
     `配置文件: ${choicePath}`,
     '该配置文件不是 artifact 根目录。',
     `artifact_dir 只用于 PaceFlow artifacts：${PACE_ARTIFACT_ROOT_CONTENT}。`,
-    `配置写入后再从目标项目 cwd 运行 reserve helper：node "${RESERVE_ARTIFACT_ID_SCRIPT}" --operation create-chg`,
+    `配置写入后再从目标项目 cwd 运行 reserve helper：node "${RESERVE_ARTIFACT_ID_SCRIPT}" --operation create-chg --cwd "${path.resolve(cwd).replace(/\\/g, '/')}"`,
     'reserve helper 不接受 --artifact-dir / --artifact-root / --project-dir；自动化只可用 --cwd。',
     '写入配置后，不要直接重试代码写入；先创建/批准 CHG，再重试被阻止的代码写入。若被阻止的是 artifact-writer Agent，则按提示重派同一操作。'
   ].join('\n');

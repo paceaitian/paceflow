@@ -579,7 +579,7 @@ paceUtils.withStdinParsed((stdin) => {
             ? paceUtils.findArtifactReservationForRel(cwd, { sessionId: stdin.sessionId, agentId: stdin.agentId }, lookupRel)
             : paceUtils.readArtifactReservation(cwd, { sessionId: stdin.sessionId, agentId: stdin.agentId });
           if (!reservationMatchesExplicit(reservation, explicit)) {
-            const reason = reservationExplicitMissingReason(operation, explicit);
+            const reason = reservationExplicitMissingReason(operation, explicit, cwd);
             emitDeny('DENY_AGENT_RESERVED_PROMPT_MISMATCH', reason, {
               agent: stdin.toolInput.subagent_type || stdin.toolInput.subagentType,
               artifact_dir: displayDir(artDir),
@@ -1253,7 +1253,7 @@ paceUtils.withStdinParsed((stdin) => {
           : '';
         const reason = (doneEntries.length > 0
           ? `本项目当前只有已完成/跳过索引，请先派 artifact-writer close-chg 收尾归档，或 create-chg 创建新的变更后再写代码。archive-chg 仅用于已 verified 的单独归档修复。${FORMAT_SNIPPETS.closeOp}`
-          : `本项目没有活跃 CHG/HOTFIX。请先创建 CHG 后再写代码。\n${artifactWriterCreateChgHint(artDir)}`) + siblingHint;
+          : `本项目没有活跃 CHG/HOTFIX。请先创建 CHG 后再写代码。\n${artifactWriterCreateChgHint(artDir, cwd)}`) + siblingHint;
         emitDeny(`DENY_V6_NO_ACTIVE${teammateTag}`, reason, { tool: toolName });
         return;
       }
@@ -1369,10 +1369,10 @@ paceUtils.withStdinParsed((stdin) => {
           reason = `${createdMsg}检测到 PACE 项目（${paceSignal}）但 task.md 中无活跃任务。`;
           reason += hasUnsyncedPlanFiles(cwd)
             ? `检测到未同步的 Superpowers 计划文件，请调用 paceflow:pace-bridge：Read plan → 派 artifact-writer create-chg 创建 CHG 后再写代码。`
-            : `请先执行 P-A-C 流程（Plan→Artifact→Check）定义任务后再写代码。\n${artifactWriterCreateChgHint(artDir)}\ntask.md 格式：${FORMAT_SNIPPETS.taskGroup}\n索引行格式：${FORMAT_SNIPPETS.taskEntry}\n任务状态：${FORMAT_SNIPPETS.statusHelp}\n变更状态：${FORMAT_SNIPPETS.changeStatusHelp}`;
+            : `请先执行 P-A-C 流程（Plan→Artifact→Check）定义任务后再写代码。\n${artifactWriterCreateChgHint(artDir, cwd)}\ntask.md 格式：${FORMAT_SNIPPETS.taskGroup}\n索引行格式：${FORMAT_SNIPPETS.taskEntry}\n任务状态：${FORMAT_SNIPPETS.statusHelp}\n变更状态：${FORMAT_SNIPPETS.changeStatusHelp}`;
         }
       } else {
-        reason = `${createdMsg}检测到 PACE 激活信号（${paceSignal}）但 task.md 不存在。\n${artifactWriterCreateChgHint(artDir)}\n${FORMAT_SNIPPETS.skillRef}`;
+        reason = `${createdMsg}检测到 PACE 激活信号（${paceSignal}）但 task.md 不存在。\n${artifactWriterCreateChgHint(artDir, cwd)}\n${FORMAT_SNIPPETS.skillRef}`;
       }
       emitDeny(`DENY${teammateTag}`, reason, { signal: paceSignal, tool: toolName, file: filePath, created: createdFiles.join(', '), reason });
       return;

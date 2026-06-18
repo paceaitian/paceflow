@@ -3382,6 +3382,34 @@ test('skills 明确 HOTFIX reserve helper 用法与 --new 边界', () => {
   }
 });
 
+test('reserve --cwd 对称守护：全 hook 生成的 reserve create-chg/record-correction 命令都带 --cwd（CHG-20260619-01，防再漏对称半边）', () => {
+  // 背景：CHG-20260618-03 T-002 改了 SessionStart 注入 + skill 模板，但漏了 hook 内共享 snippet
+  //   FORMAT_SNIPPETS.reserveHelper + pace-utils:393 + agent-lifecycle record-correction（finding-2026-06-19-chg3-t002...）。
+  //   本守护扫全 hook .js：凡拼接 RESERVE_ARTIFACT_ID_SCRIPT 生成 reserve create-chg/record-correction 命令的行，都须带 --cwd
+  //   （hook 有 cwd scope→注入真实 cwd；reserveHelper 函数模板含条件 --cwd）。skill 静态模板（占位符 --cwd <项目 cwd>）不在本扫描范围（非 .js）。
+  const hooksDir = path.join(__dirname, '..', 'plugin', 'hooks');
+  const jsFiles = [];
+  const walk = (dir) => {
+    for (const name of fs.readdirSync(dir)) {
+      const fp = path.join(dir, name);
+      if (fs.statSync(fp).isDirectory()) walk(fp);
+      else if (name.endsWith('.js')) jsFiles.push(fp);
+    }
+  };
+  walk(hooksDir);
+  const violations = [];
+  for (const fp of jsFiles) {
+    fs.readFileSync(fp, 'utf8').split('\n').forEach((line, i) => {
+      // regex 放宽到 /--operation \S/（含 `--operation ${operation}` 变量行，覆盖 reservationExplicitMissingReason:386 等变量化生成点；
+      //   仅匹配字面 create-chg|record-correction 会漏扫变量行 → 虚假绿灯，R 审计 CHG-20260619-01 抓出）。
+      if (line.includes('RESERVE_ARTIFACT_ID_SCRIPT') && /--operation \S/.test(line) && !line.includes('--cwd')) {
+        violations.push(`${path.relative(hooksDir, fp)}:${i + 1}: ${line.trim()}`);
+      }
+    });
+  }
+  assert.deepStrictEqual(violations, [], `以下 hook reserve 命令缺 --cwd（须内联真实 cwd）：\n${violations.join('\n')}`);
+});
+
 test('skills 在无 hook 注入时给出 skill-root helper fallback', () => {
   const repoRoot = path.join(__dirname, '..');
   const files = {

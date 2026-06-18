@@ -2,7 +2,7 @@ const path = require('path');
 
 const HOOKS_DIR = path.resolve(__dirname, '..');
 
-const PACE_VERSION = 'v7.2.16';
+const PACE_VERSION = 'v7.2.17';
 // CHG-20260616-01 T-002：补无歧义主流语言扩展名——让写码门对这些语言用户也能启动（确定性门是兜底非
 // 攻防完备：歧义项 .m/.r/.pl/.sql 故意不补，over-block 代价 > under-block，宁漏不误伤）。
 // 注意双消费：除写码门(isCodeFile)外，本集合还供 countCodeFiles → detectSoftSignal/SOFT_WARN 软提示复用
@@ -69,7 +69,7 @@ const FORMAT_SNIPPETS = {
   formatRule: 'hook 检测格式为行首 "- [/] "（Markdown checkbox），表格或 emoji 格式无法识别',
   approveAndStartOp: '批准并开始 = 派 artifact-writer approve-and-start；字段格式见 Skill(paceflow:artifact-management)',
   closeOp: '收尾 = 先运行并读取验证结果，再编排对抗审计并路由 findings；通过后派 artifact-writer close-chg（含 verification-confirmed + review-confirmed/review-source/review-findings）；字段格式见 Skill(paceflow:artifact-management)',
-  reserveHelper: `预留编号 = 主 session 先运行 Bash: node "${RESERVE_ARTIFACT_ID_SCRIPT}" --operation create-chg，并把输出原样放到 artifact-writer prompt 顶部`,
+  reserveHelper: (cwd) => `预留编号 = 主 session 先运行 Bash: node "${RESERVE_ARTIFACT_ID_SCRIPT}" --operation create-chg${cwd ? ` --cwd "${String(cwd).replace(/\\/g, '/')}"` : ''}，并把输出原样放到 artifact-writer prompt 顶部`,
   syncPlanHelper: `同步 plan = 桥接成功后运行 Bash: node "${SYNC_PLAN_SCRIPT}" --plan "<已桥接 plan 绝对路径>"`,
   setArtifactRootHelper: `选择 artifact root = 用户选择后运行 Bash: node "${SET_ARTIFACT_ROOT_SCRIPT}" --choice local 或 --choice vault`,
   setProjectRootHelper: `声明独立 Project Root = 在子目录 cwd 运行 Bash: node "${SET_PROJECT_ROOT_SCRIPT}" --mode independent`,
