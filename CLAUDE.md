@@ -51,4 +51,15 @@ node bump-version.js v7.2.16             # 同步 5 处：constants.js PACE_VERS
 - `README.md` 版本历史表格新增一行 changelog（人读描述，脚本不生成）
 - `CLAUDE.md` 等散文里残留的版本号（如有）
 
-收尾仍走上面「常用验证」：`node tests/run-all.js` 8/8 → commit → push → 三向确认 `git rev-parse HEAD` == `git rev-parse origin/master` == `git ls-remote origin master`（防 commit/push 链短路推旧 HEAD 静默漏发）。
+收尾走上面「常用验证」：`node tests/run-all.js` 8/8 → commit → push → 三向确认 `git rev-parse HEAD` == `git rev-parse origin/master` == `git ls-remote origin master`（防 commit/push 链短路推旧 HEAD 静默漏发）。
+
+push 三向确认后，**打 tag + 建 GitHub release**——漏这步会让版本史断档、用户看不到 release notes（v7.0~v7.2.14 就因发版流程没写这步全缺、后来批量回填）：
+
+```bash
+# tag 打在 release commit（version bump 那个），不是其后的 docs commit
+git tag -a v7.2.16 <release-commit> -m "v7.2.16: <一句话标题>"
+git push origin v7.2.16
+
+# release notes 从 README changelog 当行整理成文件；gh 未认证先 gh auth login -h github.com
+gh release create v7.2.16 --title "v7.2.16 — <标题>" --notes-file <notes-file>
+```
