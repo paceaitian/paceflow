@@ -253,6 +253,12 @@ function renderProjectContext(state, paceUtils) {
     `Runtime Root: ${rootInfo.runtimeRoot.replace(/\\/g, '/')}`,
     `模式: ${projectContextMode(rootInfo)}（mode=${rootInfo.mode}）`,
   ];
+  if (rootInfo.mode === 'inherited' || rootInfo.mode === 'worktree') {
+    // 文件归属防呆：双层场景（CWD≠Project Root）下，AI 易把代码/普通文档（docs/、审计报告）
+    // 误放到醒目的 Project Root。措辞直接搬 pace-workflow SKILL.md「Worktree」段原话保证单源
+    // 一致（改一处同步另一处）；防呆前移到注入层，因注入先于 skill 被 AI 看到、且不需 invoke。
+    lines.push('主 session 修改普通项目文件仍以当前 cwd/worktree 为准；只有 PaceFlow artifacts 与 .pace 运行态走 Project Root 共享位置。');
+  }
   if (rootInfo.mode === 'inherited') {
     lines.push(`若这是独立子项目，先运行：node "${paceUtils.SET_PROJECT_ROOT_SCRIPT}" --mode independent`);
   }

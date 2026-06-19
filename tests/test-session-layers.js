@@ -801,6 +801,39 @@ test('SL-42. sibling-detached 摘要行含「原 session 已关闭，可接手�
   assert.ok(l0.includes('原 session 已关闭，可接手'), 'detached 摘要应含接手提示：' + l0);
 });
 
+// --- 43/44/45. CHG-20260619-02：inherited/worktree 双层场景注入文件归属防呆句（对齐 pace-workflow SKILL.md，防普通文档误放 Project Root）---
+test('SL-43. inherited 场景项目上下文段注入文件归属防呆句（搬 SKILL.md 原话）', () => {
+  const state = makeActiveState();
+  state.projectContext.rootInfo.mode = 'inherited';
+  state.projectContext.rootInfo.projectRoot = '/tmp/parent-project';
+  const head = buildLayers(state, 'startup', paceUtils, 'core').l1head.join('\n');
+  assert.ok(head.includes('=== PACEflow 项目上下文 ==='), '项目上下文段存在');
+  assert.ok(
+    head.includes('主 session 修改普通项目文件仍以当前 cwd/worktree 为准'),
+    'inherited 场景注入文件归属原话（与 SKILL.md 对齐）：' + head
+  );
+});
+
+test('SL-44. worktree 场景同样注入文件归属防呆句', () => {
+  const state = makeActiveState();
+  state.projectContext.rootInfo.mode = 'worktree';
+  const head = buildLayers(state, 'startup', paceUtils, 'core').l1head.join('\n');
+  assert.ok(
+    head.includes('只有 PaceFlow artifacts 与 .pace 运行态走 Project Root'),
+    'worktree 场景注入文件归属原话：' + head
+  );
+});
+
+test('SL-45. independent（CWD==Root）不注入文件归属句（无歧义，避免增噪）', () => {
+  const state = makeActiveState(); // 默认 mode='independent'
+  const head = buildLayers(state, 'startup', paceUtils, 'core').l1head.join('\n');
+  assert.ok(head.includes('=== PACEflow 项目上下文 ==='), '项目上下文段仍存在');
+  assert.ok(
+    !head.includes('主 session 修改普通项目文件仍以当前 cwd/worktree 为准'),
+    'independent 场景不注入文件归属句（反向守护，无歧义不增噪）'
+  );
+});
+
 process.on('exit', () => {
   t.cleanup();
   console.log(`\n${t.failed === 0 ? '✅' : '❌'} ${t.passed}/${t.passed + t.failed} tests passed`);

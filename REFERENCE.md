@@ -1,8 +1,8 @@
-# PACEflow v7.2.17 参考手册
+# PACEflow v7.2.18 参考手册
 
-> 最后更新：2026-06-16
+> 最后更新：2026-06-19
 > 协议：PACE (Plan-Artifact-Check-Execute-Verify-Review)
-> v6 决策：不兼容 v5 活跃流程；v5 内容只作为 ARCHIVE 历史。
+> 兼容性：不兼容 v5 活跃流程；v5 内容只作为 ARCHIVE 历史。
 
 ---
 
@@ -22,7 +22,7 @@
 | v6 迁移 guidebook | `docs/paceflow-v6-guidebook.md` |
 | v6→v7 升级指引（顺序铁律 / 锁死恢复 / migrate-v7 用法） | `README.md` §「v6 用户升级到 v7」 |
 
-`install.js` / `verify.js` 只允许作为本地 smoke/健康检查工具，不是 v6 正式安装路径；对应本地测试文件 `tests/test-install.js` 也不属于 tracked release gate。
+`install.js` / `verify.js` 只允许作为本地 smoke/健康检查工具，不是正式安装路径；对应本地测试文件 `tests/test-install.js` 也不属于 tracked release gate。
 
 ---
 
