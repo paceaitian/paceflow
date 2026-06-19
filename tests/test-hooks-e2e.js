@@ -1523,19 +1523,30 @@ test('9aa. 未知 subagent 仍不能写 APPROVED / VERIFIED 标志', () => {
   assert.ok(r.stdout.includes('artifact-writer'));
 });
 
-test('LOG-ISOLATION: 注入 PACE_LOG_PATH 后 hook 不写源码树 pace-hooks.log（等价锁）', () => {
-  // CHG-20260614-08 T-001/T-002 等价锁：遍历断言「设了 PACE_LOG_PATH 后源码树
-  // plugin/hooks/pace-hooks.log 的 mtime/size 不变」，覆盖会 log 的 hook，防某 hook 漏改仍污染。
+test('LOG-ISOLATION: 注入 PACE_LOG_PATH 后 hook 日志进 E2E 不进源码树（等价锁，按内容判定免疫并发写）', () => {
+  // CHG-20260619-04（修 v7.2.18 审计 P2-2）：原断言比源码树 pace-hooks.log 的 mtime/size before/after，
+  // 锚定的是 dogfood（本仓库 PACEflow 激活时跑测试）期间会被 live session hook 并发写的可变资源——
+  // 外部写落进 before..assert 窗口即误红（flaky，污染 release gate、训练「重跑即绿」掩盖真回归）。
+  // 改按内容正向判定：本测试 hook 日志（含唯一 proj 标识）应进注入的 E2E_LOG_PATH、不进源码树；
+  // 无关 session 并发写 proj 标识不同，不误红。保留「某 hook 漏用 createLogger 仍污染源码树」检测意图。
   const srcLog = path.join(HOOKS_DIR, 'pace-hooks.log');
-  const stat = () => (fs.existsSync(srcLog) ? `${fs.statSync(srcLog).mtimeMs}:${fs.statSync(srcLog).size}` : 'absent');
-  const before = stat();
+  const readSrc = () => (fs.existsSync(srcLog) ? fs.readFileSync(srcLog, 'utf8') : '');
+  const srcBefore = readSrc();
+  const e2eBefore = fs.existsSync(E2E_LOG_PATH) ? fs.readFileSync(E2E_LOG_PATH, 'utf8') : '';
   const dir = makeV6Project('log-isolation');
-  // 覆盖多个会写日志的 hook（pre/post-tool-use、session-start、stop）
+  const proj = path.basename(dir); // 唯一 proj 标识；hook 日志的 proj 字段据此（getProjectName ≈ basename）
+  // 覆盖多个会写日志的 hook（pre-tool-use、session-start、stop）
   runHook('pre-tool-use.js', { cwd: dir, stdin: codeEditStdin(dir) });
   runHook('session-start.js', { cwd: dir, stdin: {} });
   runHook('stop.js', { cwd: dir, stdin: {} });
-  assert.strictEqual(stat(), before, '注入 PACE_LOG_PATH 后源码树 pace-hooks.log 的 mtime/size 不应变化');
-  assert.ok(fs.existsSync(E2E_LOG_PATH), 'hook 应写入注入的 E2E 独立日志而非源码树');
+  // 正向：本测试 hook 日志进注入的 E2E 独立日志（含 proj 标识）
+  const e2eAfter = fs.existsSync(E2E_LOG_PATH) ? fs.readFileSync(E2E_LOG_PATH, 'utf8') : '';
+  assert.ok(e2eAfter.length > e2eBefore.length, 'hook 应写入注入的 E2E 独立日志而非源码树');
+  assert.ok(e2eAfter.includes(proj), 'E2E 日志应含本测试 proj 标识，证 hook 日志确实进 E2E');
+  // 等价锁（免疫并发写）：源码树日志在测试窗口内无本测试 proj 标识的新行——
+  // 某 hook 漏 createLogger 才会把本测试日志污染进源码树；无关 session 并发写 proj 不同不误红。
+  const srcNew = readSrc().slice(srcBefore.length);
+  assert.ok(!srcNew.includes(proj), '源码树 pace-hooks.log 不应出现本测试 proj 标识（hook 漏用 createLogger 才会污染）：' + srcNew.slice(0, 500));
 });
 
 test('9ab. marker 日志包含 agent_id / agent_type', () => {
@@ -4609,6 +4620,32 @@ test('9hc1d. approve 纯批准且带确认证据 → 放行', () => {
   assert.ok(r.stdout.includes('ARTIFACT_DIR 已确认'));
 });
 
+test('9hc1e. approve-only + approval-evidence 含触发动词「开始执行」→ 放行（删散文话术门后不误伤用户原话）', () => {
+  const dir = makeV6Project('agent-approve-evidence-trigger-word');
+  const r = runHook('pre-tool-use.js', {
+    cwd: dir,
+    stdin: {
+      tool_name: 'Agent',
+      tool_input: {
+        subagent_type: 'paceflow:artifact-writer',
+        description: 'Approve only, trigger word in evidence',
+        prompt: [
+          `artifact_dir: ${dir.replace(/\\/g, '/')}/`,
+          'operation: update-chg',
+          'target: CHG-20260504-01',
+          'action: approve',
+          'approval-confirmed: true',
+          'approval-source: user-directive',
+          'approval-evidence: 用户原话「先批准，等我确认后再开始执行」',
+        ].join('\n'),
+      },
+    },
+  });
+  assert.strictEqual(r.code, 0);
+  assert.ok(!r.stdout.includes('"deny"'), 'approve-only 用户原话含「开始执行」不应误伤 DENY：' + r.stdout);
+  assert.ok(r.stdout.includes('ARTIFACT_DIR 已确认'));
+});
+
 test('9hc2. update-status 与 verify 串联 → DENY', () => {
   const dir = makeV6Project('agent-update-status-verify-chain');
   const r = runHook('pre-tool-use.js', {
@@ -4625,7 +4662,7 @@ test('9hc2. update-status 与 verify 串联 → DENY', () => {
           'action: update-status',
           'task-id: T-001',
           'new-status: x',
-          '然后执行 verify 操作',
+          'update-chg action=verify',
         ].join('\n'),
       },
     },
@@ -4635,6 +4672,32 @@ test('9hc2. update-status 与 verify 串联 → DENY', () => {
   assert.ok(r.stdout.includes('不要把 update-status'));
   assert.ok(r.stdout.includes('operation: close-chg'));
   assert.ok(r.stdout.includes('complete-open-tasks: true'));
+});
+
+test('9hc2d. update-status 暂停 + status-reason 提到「执行 verify 操作」（无结构化 action:verify）→ 放行（删散文话术门后不靠措辞猜串联）', () => {
+  const dir = makeV6Project('agent-update-status-prose-verify-mention');
+  const r = runHook('pre-tool-use.js', {
+    cwd: dir,
+    stdin: {
+      tool_name: 'Agent',
+      tool_input: {
+        subagent_type: 'paceflow:artifact-writer',
+        description: 'Pause task, prose verify mention',
+        prompt: [
+          `artifact_dir: ${dir.replace(/\\/g, '/')}/`,
+          'operation: update-chg',
+          'target: CHG-20260504-01',
+          'action: update-status',
+          'section: tasks',
+          'task-id: T-001',
+          'new-status: [!]',
+          'status-reason: 暂停，等用户确认后再执行 verify 操作',
+        ].join('\n'),
+      },
+    },
+  });
+  assert.strictEqual(r.code, 0);
+  assert.ok(!r.stdout.includes('"deny"'), 'update-status 暂停 status-reason 含「执行 verify 操作」不应误伤 DENY：' + r.stdout);
 });
 
 test('9hc2a. update-status [!] 缺少暂停/阻塞原因 → DENY', () => {

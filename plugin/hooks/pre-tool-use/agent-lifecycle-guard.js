@@ -390,10 +390,11 @@ function reservationExplicitMissingReason(operation, explicit, cwd) {
 
 function promptMentionsVerifyAction(prompt) {
   const text = String(prompt || '');
+  // 只读结构化 verify action，不解析自由文本话术（CHG-20260619-03：删散文 blocklist 分支
+  // 「执行 verify 操作 / verify 操作」——它扫 status-reason 等自由文本猜「update-status+verify 串联」
+  // 意图，而单次派遣 action 已唯一确定、串联执行层不可达；对齐「门读结构化字段非话术」原则）。
   return /(?:^|[\s\n])action\s*[:=]\s*verify\b/i.test(text) ||
-    /\bupdate-chg\s+action=verify\b/i.test(text) ||
-    /执行\s*verify\s*操作/i.test(text) ||
-    /\bverify\s+操作/i.test(text);
+    /\bupdate-chg\s+action=verify\b/i.test(text);
 }
 
 // A05：promptFieldValue 捕获到行尾（不被空格终止），operation/action 行带尾随说明文字时
@@ -417,9 +418,11 @@ function promptDeclaredAction(prompt) {
 
 function promptApproveContainsStartIntent(prompt) {
   const text = String(prompt || '');
+  // 只读结构化 in-progress 状态意图，不解析自由文本话术（CHG-20260619-03：删散文 blocklist 分支
+  // 「开始实施/开始执行/立即开始/...」——它扫整段（含 approval-evidence 用户原话），approve-only
+  // 场景用户原话逐字含触发动词即误伤；对齐 CHG-20260616-04 删 COMPLETION_PHRASES 的「门读结构化字段非话术」原则）。
   return /(?:status|状态)[^\n]{0,24}(?:in-progress|进行中)/i.test(text) ||
-    /(?:改为|设为|推到|进入)[^\n]{0,24}(?:in-progress|进行中)/i.test(text) ||
-    /(?:开始实施|开始执行|立即开始|启动任务|标记为\s*\[\/\]|标记.*进行中)/i.test(text);
+    /(?:改为|设为|推到|进入)[^\n]{0,24}(?:in-progress|进行中)/i.test(text);
 }
 
 function normalizeTaskStatusValue(value) {

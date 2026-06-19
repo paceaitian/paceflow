@@ -350,11 +350,17 @@ paceflow/
 │   │   ├── pre-tool-use/             #     PreToolUse guard helper modules
 │   │   │   ├── agent-lifecycle-guard.js
 │   │   │   ├── bash-guard.js
+│   │   │   ├── command-recognition.js
 │   │   │   ├── marker-guard.js
 │   │   │   └── powershell-guard.js
 │   │   ├── post-tool-use.js          #     写代码后：归档提醒 + 格式检查
 │   │   ├── post-tool-use-failure.js  #     工具失败后：恢复提示
 │   │   ├── session-start.js          #     会话启动：上下文注入
+│   │   ├── session-start/            #     SessionStart 注入层子模块
+│   │   │   ├── budget.js
+│   │   │   ├── collect-state.js
+│   │   │   ├── layers.js
+│   │   │   └── runtime-effects.js
 │   │   ├── subagent-stop.js          #     artifact-writer 报告观察
 │   │   ├── stop.js                   #     会话结束：完成度检查
 │   │   ├── stop-failure.js           #     API 错误中断：事件日志
@@ -465,6 +471,7 @@ paceflow/
 
 | 版本 | 日期 | 主要变更 |
 |------|------|----------|
+| v7.2.19 | 2026-06-19 | **v7.2.18 全量审计修复——删 2 处话术门 + 修 LOG-ISOLATION dogfood flaky + README 树补漏**（CHG-20260619-03/04/05，change-set v7218-audit-fix）：承接 v7.2.18 全量审计（Opus ultracode 12 维 finder + 主 session 亲核，P0/P1=0）。**CHG-A（话术门）**——agent-lifecycle-guard 删两处散文 blocklist 分支：`promptApproveContainsStartIntent:422`「开始实施/开始执行/...」（扫整段含 approval-evidence 用户原话、approve-only 误伤）+ `promptMentionsVerifyAction:395/396`「执行 verify 操作」（扫 status-reason 猜串联意图，而单次派遣 action 已唯一确定、update-status+verify 串联执行层不可达），保各自结构化分支（420/421 status→in-progress、393/394 action:verify）；对齐 CHG-20260616-04 删 COMPLETION_PHRASES 的「门读结构化字段绝不解析话术」原则。审计原评 P2-1，用户质疑「approve 守卫非自动扫描、误伤需多重条件且仅多一次往返」+ 同构 P3-1 必同级，复核降 P3（记忆 audit-severity-complete-harm-chain：危害链走完别把反模式存在当高危）；删的理由是架构一致性非误伤频率。改门必验反向：9hc1e（approve evidence 含触发词放行）/9hc2d（update-status 散文 verify 放行）over-block 消失 + 9hc1c/9hc2 结构化仍 DENY under-block 守护。**CHG-B（测试 flaky）**——LOG-ISOLATION 等价锁从「源码树 pace-hooks.log mtime/size before/after」（锚定被 dogfood live session hook 并发写的可变资源 → flaky 污染 release gate、训练「重跑即绿」）改按内容正向判定（本测试 proj 标识应进 E2E 不进源码树，无关并发写 proj 不同免疫、漏注入污染仍抓）；node -e 确定性对比验证三点（原误红/新免疫/保检测意图）。**CHG-C（文档）**——README 项目结构树补 `command-recognition.js`（pre-tool-use/ 漏第 5 文件）+ `session-start/` 子目录 4 文件（完全漏列、v7.2.18 layers.js 改动落点）。三 CHG 各 manual/对抗 R 审计 P0-P3=0。`node tests/run-all.js` 8/8：test-hooks-e2e 458（+9hc1e/9hc2d）、test-pace-utils 299、test-session-layers 51、test-migrate-v7 16、test-agent-tests-helpers 11、run-all-self 6 |
 | v7.2.18 | 2026-06-19 | **SessionStart 双层场景注入文件归属防呆句**（CHG-20260619-02）：`renderProjectContext`（layers.js）在 inherited/worktree 双层场景（Current CWD ≠ Project Root）注入文件归属原话「主 session 修改普通项目文件仍以当前 cwd/worktree 为准；只有 PaceFlow artifacts 与 .pace 运行态走 Project Root 共享位置」——直接搬 `pace-workflow SKILL.md:140` 原话保证注入==skill 单源一致（加对齐注释防 doc-sync 漂移），防呆前移到注入层（注入先于 skill 被 AI 看到、不需 invoke skill）。源起一个 fresh session 在子目录启动、Project Root 解析为父级（mode=inherited 是子目录继承父项目的**设计本意**非 bug——correction-2026-06-19-04 记我误判设计意图为「算法巧合」被用户纠正），把 audit 误放到父级 docs/audits；回 design doc §7.1 查清「项目上下文段只输出路径、不展开解释」是被实践证伪的旧取舍。TDD 红→绿（SL-43 inherited / SL-44 worktree 正向 + SL-45 independent 反向守护无增噪）；R 审计 grep 字字比对注入句==skill 原话（仅 `.pace` 反引号为 markdown→纯文本载体适配）P0-P3=0。附 REFERENCE v6 措辞修正（「v6 决策」→「兼容性」、去冗余「v6 正式安装路径」）。`node tests/run-all.js` 8/8：test-session-layers 51（+SL-43/44/45）、test-hooks-e2e 456、test-pace-utils 299、test-migrate-v7 16、test-agent-tests-helpers 11、run-all-self 6 |
 | v7.2.17 | 2026-06-19 | **reserve --cwd 对称内联补全**（CHG-20260619-01）：补 v7.2.16（CHG-03 T-002）遗漏的 hook 内 reserve 命令 --cwd——`FORMAT_SNIPPETS.reserveHelper`（写码门 deny + agent 派遣 deny 共享 snippet）从静态常量升级为接 cwd 的函数 `reserveHelper(cwd)`（有值内联 `--cwd "实际值"`、无值 fallback 兼容），+ `pace-utils:393` artifactRootChoiceMessage + agent-lifecycle `reservationRequiredReason`/`reservationExplicitMissingReason` 的 reserve/record-correction 命令全部补 --cwd。hook deny 有 cwd scope 故注入真实值（对齐 SessionStart、copy 即用根治 Bash cwd 漂移致 reservation 写错 runtime），skill 静态模板保持占位符。源起 CHG-4 dogfood 写码门 deny 时核 deny 载荷发现「门 deny 触发 ≠ 门正确」（correction-2026-06-19-03 链 verification-discipline）。opus R 审计抓出 `:386` 同根残留 + 守护 regex `${operation}` 变量盲区虚假绿灯，本 CHG 内补全（守护放宽 `/--operation \S/`）。新增对称守护测试防再漏。`node tests/run-all.js` 8/8：test-hooks-e2e 456、test-pace-utils 299、test-session-layers 48、test-migrate-v7 16、test-agent-tests-helpers 11、run-all-self 6 |
 | v7.2.16 | 2026-06-18 | **入口闭环修复路线——pace-workflow 纯化 + record-correction 字段 hard-deny + knowledge 评估信号**（CHG-20260618-01/02/03）：承接 ultracode 入口自闭环审计，PACEflow 激活/流程引导单源化。**CHG-01**——被纠正→记 correction（N11）、finding 评估通用性→pace-knowledge（N13）、验证失败重验（N17）引导进 pace-workflow skill；artifact-writer frontmatter 加 `skills: [pace-knowledge]` 预加载（官方 subagent 字段，实测 tool_uses:0）；record-finding/correction 加「knowledge 评估信号」段（agent 给信号、主 session 裁决沉淀）；修 pace-knowledge stale「无 modify-finding」句（`update-finding` 可 append 追加正文）。**CHG-02**——agent-lifecycle-guard 补 record-correction 五必填 + knowledge-link/project-scope 二选一字段 hard-deny（复用 `DENY_AGENT_LIFECYCLE_PROMPT`、对齐 approve/review/close、不自创 code），含子串污染回归护栏测试。**CHG-03**——pace-workflow 纯化为「已启用后流程」（删激活 flowchart + 回退 N01 自判判据 + 删豁免表，激活权威归 hook 的 `detectSoftSignal`/`isPaceProject`/AskUserQuestion，slash command 发现靠 Claude 内置 `/help`）；reserve `--cwd` 模板对称内联（4 skill + SessionStart 动态注入，根治主 session Bash cwd 漂移致 reservation 写错 runtime）；N07 Stop verify 前缀单列（消除默认前缀「不要执行新任务」与正文「去验证 / 审计」抵触）；N15 reserve deny 内联完整命令 + batch 对称；N14 活跃 CHG 摘要状态符号图例。三 CHG 各 opus R 审计 P0/P1=0（CHG-03 P0/P1/P2=0）。`node tests/run-all.js` 8/8：test-hooks-e2e 456、test-pace-utils 298、test-session-layers 48、test-migrate-v7 16、test-agent-tests-helpers 11、run-all-self 6 |
@@ -568,4 +575,4 @@ v5 历史快照见 `CHANGELOG.md`；v6 当前历史以本表为准。
 
 ---
 
-**版本**: v7.2.18 | **运行时**: Node.js | **平台**: Windows / macOS / Linux | **协议**: PACE (Plan-Artifact-Check-Execute-Verify-Review)
+**版本**: v7.2.19 | **运行时**: Node.js | **平台**: Windows / macOS / Linux | **协议**: PACE (Plan-Artifact-Check-Execute-Verify-Review)
