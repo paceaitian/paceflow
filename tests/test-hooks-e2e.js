@@ -123,7 +123,8 @@ function runSetActivationHelper({ cwd, args = [], env = {} }) {
 }
 
 function today() {
-  return new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
+  // 与 todayISO 同口径（宿主本地时区，CHG-20260619-07 去硬编码后对齐）
+  return new Date().toLocaleDateString('sv-SE');
 }
 
 function slugFromId(id) {
@@ -4698,6 +4699,140 @@ test('9hc2d. update-status 暂停 + status-reason 提到「执行 verify 操作�
   });
   assert.strictEqual(r.code, 0);
   assert.ok(!r.stdout.includes('"deny"'), 'update-status 暂停 status-reason 含「执行 verify 操作」不应误伤 DENY：' + r.stdout);
+});
+
+// CHG-20260619-07 T-001：update-index / update-finding 早期字段门（对齐 gated op 体验，省一次 agent 往返）
+test('9hc-ui1. update-index 缺 action → DENY 要求 action: reorder', () => {
+  const dir = makeV6Project('agent-update-index-missing-action');
+  const r = runHook('pre-tool-use.js', {
+    cwd: dir,
+    stdin: {
+      tool_name: 'Agent',
+      tool_input: {
+        subagent_type: 'paceflow:artifact-writer',
+        description: 'reorder index',
+        prompt: [
+          `artifact_dir: ${dir.replace(/\\/g, '/')}/`,
+          'operation: update-index',
+          'target: findings.md',
+        ].join('\n'),
+      },
+    },
+  });
+  assert.strictEqual(r.code, 0);
+  assert.ok(r.stdout.includes('"deny"'), 'update-index 缺 action 应早期 DENY：' + r.stdout);
+  assert.ok(r.stdout.includes('action: reorder'));
+});
+
+test('9hc-ui2. update-index target 非 findings.md/corrections.md → DENY', () => {
+  const dir = makeV6Project('agent-update-index-bad-target');
+  const r = runHook('pre-tool-use.js', {
+    cwd: dir,
+    stdin: {
+      tool_name: 'Agent',
+      tool_input: {
+        subagent_type: 'paceflow:artifact-writer',
+        description: 'bad target',
+        prompt: [
+          `artifact_dir: ${dir.replace(/\\/g, '/')}/`,
+          'operation: update-index',
+          'target: task.md',
+          'action: reorder',
+        ].join('\n'),
+      },
+    },
+  });
+  assert.strictEqual(r.code, 0);
+  assert.ok(r.stdout.includes('"deny"'), 'update-index 非法 target 应 DENY：' + r.stdout);
+  assert.ok(r.stdout.includes('findings.md'));
+});
+
+test('9hc-ui3. update-index target=findings.md + action=reorder → 放行', () => {
+  const dir = makeV6Project('agent-update-index-ok');
+  const r = runHook('pre-tool-use.js', {
+    cwd: dir,
+    stdin: {
+      tool_name: 'Agent',
+      tool_input: {
+        subagent_type: 'paceflow:artifact-writer',
+        description: 'reorder ok',
+        prompt: [
+          `artifact_dir: ${dir.replace(/\\/g, '/')}/`,
+          'operation: update-index',
+          'target: findings.md',
+          'action: reorder',
+        ].join('\n'),
+      },
+    },
+  });
+  assert.strictEqual(r.code, 0);
+  assert.ok(!r.stdout.includes('"deny"'), 'update-index 合法字段不应 DENY：' + r.stdout);
+});
+
+test('9hc-ui4. update-index target 行带尾随说明 → 放行（firstToken 容错，对齐 A05；R 审计 P2-1 回归）', () => {
+  const dir = makeV6Project('agent-update-index-target-trailing');
+  const r = runHook('pre-tool-use.js', {
+    cwd: dir,
+    stdin: {
+      tool_name: 'Agent',
+      tool_input: {
+        subagent_type: 'paceflow:artifact-writer',
+        description: 'reorder with trailing note',
+        prompt: [
+          `artifact_dir: ${dir.replace(/\\/g, '/')}/`,
+          'operation: update-index',
+          'target: findings.md 按日期重排',
+          'action: reorder 顺便清空行',
+        ].join('\n'),
+      },
+    },
+  });
+  assert.strictEqual(r.code, 0);
+  assert.ok(!r.stdout.includes('"deny"'), 'update-index target/action 带尾随说明不应误伤 DENY：' + r.stdout);
+});
+
+test('9hc-uf1. update-finding 缺 target → DENY 要求 target FINDING-id', () => {
+  const dir = makeV6Project('agent-update-finding-missing-target');
+  const r = runHook('pre-tool-use.js', {
+    cwd: dir,
+    stdin: {
+      tool_name: 'Agent',
+      tool_input: {
+        subagent_type: 'paceflow:artifact-writer',
+        description: 'update finding no target',
+        prompt: [
+          `artifact_dir: ${dir.replace(/\\/g, '/')}/`,
+          'operation: update-finding',
+          'status: accepted',
+        ].join('\n'),
+      },
+    },
+  });
+  assert.strictEqual(r.code, 0);
+  assert.ok(r.stdout.includes('"deny"'), 'update-finding 缺 target 应早期 DENY：' + r.stdout);
+  assert.ok(r.stdout.includes('target'));
+});
+
+test('9hc-uf2. update-finding 带 target → 放行', () => {
+  const dir = makeV6Project('agent-update-finding-ok');
+  const r = runHook('pre-tool-use.js', {
+    cwd: dir,
+    stdin: {
+      tool_name: 'Agent',
+      tool_input: {
+        subagent_type: 'paceflow:artifact-writer',
+        description: 'update finding ok',
+        prompt: [
+          `artifact_dir: ${dir.replace(/\\/g, '/')}/`,
+          'operation: update-finding',
+          'target: finding-2026-06-19-some-slug',
+          'status: accepted',
+        ].join('\n'),
+      },
+    },
+  });
+  assert.strictEqual(r.code, 0);
+  assert.ok(!r.stdout.includes('"deny"'), 'update-finding 带 target 不应 DENY：' + r.stdout);
 });
 
 test('9hc2a. update-status [!] 缺少暂停/阻塞原因 → DENY', () => {

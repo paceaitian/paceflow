@@ -16,12 +16,15 @@ function resolveProjectCwd() {
     : process.cwd();
 }
 
+// 时间戳/日期跟随宿主系统时区（CHG-20260619-07 T-002）：原硬编码 timeZone:'Asia/Shanghai' 去除——
+//   aging 比较两侧都经 todayISO 同源，去硬编码后仍自洽；marketplace 非中国用户由此得到本地日历日，
+//   宿主即 Asia/Shanghai 时行为不变。
 function ts() {
-  return new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
+  return new Date().toLocaleString('zh-CN', { hour12: false });
 }
 
 function todayISO() {
-  return new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
+  return new Date().toLocaleDateString('sv-SE');
 }
 
 function isoDateDayNumber(value) {

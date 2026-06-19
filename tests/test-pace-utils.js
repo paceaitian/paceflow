@@ -1185,8 +1185,8 @@ test('#P3.4 sequence counter 被外部写成浮点不产非整数编号（CHG-20
 test('R-47: counter 缺失时 existingMax 识别带 slug 的 CHG/HOTFIX 文件名，不重发同 ID', () => {
   const dir = makeTmpDir('reservation-slug-existingmax');
   fs.mkdirSync(path.join(dir, 'changes'), { recursive: true });
-  // 与 todayISO 同口径（Asia/Shanghai），避免凌晨跨日断言漂移
-  const dateCompact = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' }).replace(/-/g, '');
+  // 与 todayISO 同口径（宿主本地时区，CHG-20260619-07 去硬编码后对齐），避免凌晨跨日断言漂移
+  const dateCompact = new Date().toLocaleDateString('sv-SE').replace(/-/g, '');
   // 混合形态：带 slug（HOTFIX-20260610-01 后的常态）+ 无 slug 旧格式并存
   fs.writeFileSync(path.join(dir, 'changes', `chg-${dateCompact}-01-some-feature-slug.md`), '---\nstatus: planned\n---\n');
   fs.writeFileSync(path.join(dir, 'changes', `chg-${dateCompact}-02.md`), '---\nstatus: planned\n---\n');
@@ -1208,6 +1208,16 @@ test('R-47: counter 缺失时 existingMax 识别带 slug 的 CHG/HOTFIX 文件�
   });
   assert.strictEqual(hf.reserved, true);
   assert.strictEqual(hf.id, `HOTFIX-${dateCompact}-02`, 'HOTFIX 分支同样识别带 slug 文件名');
+});
+
+test('T-002（CHG-20260619-07）: todayISO 跟随宿主 TZ，不再硬编码 Asia/Shanghai——相隔 26h 的两时区日期必不同', () => {
+  const { execFileSync } = require('child_process');
+  const facade = path.join(__dirname, '..', 'plugin', 'hooks', 'pace-utils.js');
+  const code = `process.stdout.write(require(${JSON.stringify(facade)}).todayISO())`;
+  const eastDate = execFileSync(process.execPath, ['-e', code], { env: { ...process.env, TZ: 'Etc/GMT-14' }, encoding: 'utf8' }).trim();
+  const westDate = execFileSync(process.execPath, ['-e', code], { env: { ...process.env, TZ: 'Etc/GMT+12' }, encoding: 'utf8' }).trim();
+  // Etc/GMT-14=UTC+14 与 Etc/GMT+12=UTC-12 相隔 26h>24h，日历日恒不同；若仍硬编码 Asia/Shanghai 则两子进程同得 Shanghai 日期=相等
+  assert.notStrictEqual(eastDate, westDate, `todayISO 应跟随宿主 TZ（east=${eastDate} west=${westDate}），若相等说明仍硬编码 Asia/Shanghai`);
 });
 
 test('同一 session 多个 reservation 可按目标文件精确匹配', () => {

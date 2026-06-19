@@ -221,6 +221,15 @@ function promptTemplateForOperation({ prompt = '', artDir = '', operation = '', 
     ].join('\n');
   }
 
+  if (op === 'update-index') {
+    return [
+      ...lines,
+      'operation: update-index',
+      'target: findings.md | corrections.md',
+      'action: reorder',
+    ].join('\n');
+  }
+
   return [
     ...lines,
     'operation: create-chg | update-chg | close-chg | archive-chg | record-finding | record-correction | update-finding | update-index',
@@ -689,6 +698,38 @@ function agentLifecyclePromptDenyReason(prompt, artDir = '') {
         promptTemplateForOperation({ prompt, artDir, operation: 'record-correction' })
       ].join('\n');
     }
+  }
+
+  // CHG-20260619-07 T-001：update-index / update-finding 早期字段门——补齐与 gated op 对称的「缺字段
+  //   hook 早拦」体验（省一次 agent spawn 往返）。只读结构化 target/action 字段，不解析自由文本；
+  //   agent 第三层 fail-closed 自校验仍是权威安全网，本门只是快速路径预检。
+  if (operation === 'update-index') {
+    // 与 operation/action 同源 firstToken 容错（A05 约定）：`target: findings.md 重排索引` 取首 token
+    //   findings.md，不因尾随说明误 DENY（R 审计 P2-1：原精确相等破坏对称）。
+    const tgt = firstToken(promptFieldValueSameLine(text, 'target')).toLowerCase();
+    const validTarget = tgt === 'findings.md' || tgt === 'corrections.md';
+    const missing = [];
+    if (!validTarget) missing.push('target（findings.md 或 corrections.md）');
+    if (action !== 'reorder') missing.push('action: reorder');
+    if (missing.length > 0) {
+      return [
+        `派 artifact-writer 执行 update-index 时缺少或写错必填字段：${missing.join(', ')}。`,
+        FORMAT_SNIPPETS.skillRef,
+        'update-index 维护索引文件排序：target 必须是 findings.md 或 corrections.md，action 必须是 reorder。',
+        '请重派同一个 agent，并使用完整 prompt 顶部模板：',
+        promptTemplateForOperation({ prompt, artDir, operation: 'update-index' })
+      ].join('\n');
+    }
+  }
+
+  if (operation === 'update-finding' && !promptHasNonEmptyField(text, 'target')) {
+    return [
+      '派 artifact-writer 执行 update-finding 时缺少必填字段：target（FINDING-id）。',
+      FORMAT_SNIPPETS.skillRef,
+      'update-finding 更新 finding 状态/链接：target 必须是 finding-id（解析到 changes/findings/<slug>.md）。',
+      '请重派同一个 agent，并使用完整 prompt 顶部模板：',
+      promptTemplateForOperation({ prompt, artDir, operation: 'update-finding' })
+    ].join('\n');
   }
 
   return '';
