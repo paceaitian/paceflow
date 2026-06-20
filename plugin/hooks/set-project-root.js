@@ -27,6 +27,8 @@ function parseArgs(argv) {
       args.unknown.push(arg);
     } else if (!args.mode) {
       args.mode = String(arg || '');
+    } else {
+      args.unknown.push(arg); // 多余 positional fail-closed 计入 unknown（CHG-20260620-01，审计 P3-3）
     }
   }
   args.cwd = args.cwd ? path.resolve(args.cwd) : paceUtils.resolveProjectCwd();

@@ -33,6 +33,8 @@ function parseArgs(argv) {
       args.unknown.push(arg);
     } else if (!args.operation && !arg.startsWith('-')) {
       args.operation = arg;
+    } else {
+      args.unknown.push(arg); // 多余 positional fail-closed 计入 unknown（CHG-20260620-01，审计 P3-3：与 unknown-flag 对称，不静默丢弃）
     }
   }
   args.operation = args.operation.trim().toLowerCase();

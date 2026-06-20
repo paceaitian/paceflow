@@ -1,6 +1,6 @@
-# PACEflow v7.2.20 参考手册
+# PACEflow v7.2.21 参考手册
 
-> 最后更新：2026-06-19
+> 最后更新：2026-06-20
 > 协议：PACE (Plan-Artifact-Check-Execute-Verify-Review)
 > 兼容性：不兼容 v5 活跃流程；v5 内容只作为 ARCHIVE 历史。
 

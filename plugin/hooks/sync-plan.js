@@ -9,7 +9,7 @@ const LOG_PATH = paceUtils.defaultLogPath();
 const log = paceUtils.createLogger(LOG_PATH);
 
 function parseArgs(argv) {
-  const args = { plan: '', cwd: '', help: false, missingValue: [] };
+  const args = { plan: '', cwd: '', help: false, unknown: [], missingValue: [] };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--help' || arg === '-h') {
@@ -18,8 +18,12 @@ function parseArgs(argv) {
       const v = flagValue(argv, i); if (v === null) args.missingValue.push(arg); else { args.plan = v; i++; }
     } else if (arg === '--cwd') {
       const v = flagValue(argv, i); if (v === null) args.missingValue.push(arg); else { args.cwd = v; i++; }
-    } else if (!args.plan && !arg.startsWith('-')) {
+    } else if (arg.startsWith('-')) {
+      args.unknown.push(arg); // 未知 flag fail-closed（CHG-20260620-01，审计 P3-3：sync-plan 原缺 unknown 处理，与其他 helper 对称）
+    } else if (!args.plan) {
       args.plan = String(arg || '');
+    } else {
+      args.unknown.push(arg); // 多余 positional fail-closed
     }
   }
   args.cwd = args.cwd ? path.resolve(args.cwd) : paceUtils.resolveProjectCwd();
@@ -49,6 +53,10 @@ function main() {
   }
   if (args.missingValue.length > 0) {
     fail(args.cwd, 'DENY_MISSING_VALUE', `sync-plan 参数缺值：${args.missingValue.join(', ')} 后未跟有效值（下一项是 flag 或缺失）。\n不吞后续 flag、不静默回落空值；请补全值后重试。\n\n${usage()}`, { missing: args.missingValue.join(',') });
+    return;
+  }
+  if (args.unknown.length > 0) {
+    fail(args.cwd, 'DENY_UNKNOWN_OPTION', `sync-plan 不支持参数：${args.unknown.join(', ')}。\n只支持 --plan 与 --cwd。\n\n${usage()}`, { options: args.unknown.join(',') });
     return;
   }
   if (!args.plan) {

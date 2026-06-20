@@ -2870,7 +2870,10 @@ test('9hc-helper1a. reserve-artifact-id helper 遇到未知参数 fail-fast', ()
     env: { CLAUDE_CODE_SESSION_ID: 'sid-helper-unknown-arg' },
   });
   assert.strictEqual(helper.code, 2);
-  assert.ok(helper.stdout.includes('不支持参数：--project-dir, --artifact-root'));
+  assert.ok(helper.stdout.includes('不支持参数'), 'fail-fast 报不支持参数');
+  // CHG-20260620-01：多余 positional 也 fail-closed 计入 unknown——`--project-dir /tmp/x` 里 reserve 不认
+  // --project-dir，故 /tmp/x 成裸 positional 一并报出，unknown 列表不再 flag 名连续，分别校验两个误传 flag 在列。
+  assert.ok(helper.stdout.includes('--project-dir') && helper.stdout.includes('--artifact-root'), '两个未知 flag 都进 unknown 列表');
   assert.ok(helper.stdout.includes('不要传 --artifact-dir / --artifact-root / --project-dir'));
   assert.ok(helper.stdout.includes('只可用 --cwd'));
 });
@@ -2911,6 +2914,49 @@ test('9hc-syncplan-mv2. sync-plan --plan 末尾缺值 → fail-closed（CHG-2026
   const helper = runSyncPlanHelper({ cwd: dir, args: ['--plan'] });
   assert.strictEqual(helper.code, 2);
   assert.ok(helper.stdout.includes('缺值'), 'sync-plan --plan 末尾缺值应报缺值');
+});
+
+// CHG-20260620-01（审计 P3-3）：4 helper parseArgs 多余 positional fail-closed 对称（原静默丢弃，与 unknown-flag 不对称）
+test('9hc-helper-pos1. reserve 多余 positional → fail-closed 计入 unknown（审计 P3-3）', () => {
+  const dir = makeV6Project('reserve-extra-positional', { withIndex: false, detail: false });
+  const helper = runReserveHelper({ cwd: dir, args: ['create-chg', 'extra-junk'], env: { CLAUDE_CODE_SESSION_ID: 'sid-reserve-extra-pos' } });
+  assert.strictEqual(helper.code, 2);
+  assert.ok(helper.stdout.includes('不支持参数'), 'reserve 多余 positional 应 fail-closed（非静默丢弃）：' + helper.stdout);
+  assert.ok(!helper.stdout.includes('reserved-id:'), '多余 positional 必须 fail-closed 不预留');
+});
+
+test('9hc-helper-pos2. set-project-root 多余 positional → fail-closed（审计 P3-3）', () => {
+  const dir = makeV6Project('spr-extra-positional', { withIndex: false, detail: false });
+  const helper = runSetProjectRootHelper({ cwd: dir, args: ['independent', 'extra-junk'] });
+  assert.strictEqual(helper.code, 2);
+  assert.ok(helper.stdout.includes('不支持参数'), 'set-project-root 多余 positional 应 fail-closed：' + helper.stdout);
+});
+
+test('9hc-helper-pos3. set-artifact-root 多余 positional → fail-closed（审计 P3-3）', () => {
+  const dir = makeV6Project('sar-extra-positional', { withIndex: false, detail: false });
+  const helper = runSetArtifactRootHelper({ cwd: dir, args: ['local', 'extra-junk'] });
+  assert.strictEqual(helper.code, 2);
+  assert.ok(helper.stdout.includes('不支持参数'), 'set-artifact-root 多余 positional 应 fail-closed：' + helper.stdout);
+});
+
+test('9hc-helper-pos4. sync-plan 多余 positional → fail-closed（审计 P3-3）', () => {
+  const dir = makeV6Project('syncplan-extra-positional', { withIndex: false, detail: false });
+  const helper = runSyncPlanHelper({ cwd: dir, args: ['plan.md', 'extra-junk'] });
+  assert.strictEqual(helper.code, 2);
+  assert.ok(helper.stdout.includes('不支持参数'), 'sync-plan 多余 positional 应 fail-closed：' + helper.stdout);
+});
+
+test('9hc-helper-pos5. sync-plan 未知 flag → fail-closed（CHG-20260620-01 补 sync-plan 缺失的 unknown 处理）', () => {
+  const dir = makeV6Project('syncplan-unknown-flag', { withIndex: false, detail: false });
+  const helper = runSyncPlanHelper({ cwd: dir, args: ['--plan', 'plan.md', '--bogus-flag'] });
+  assert.strictEqual(helper.code, 2);
+  assert.ok(helper.stdout.includes('不支持参数'), 'sync-plan 未知 flag 应 fail-closed（原静默吞）：' + helper.stdout);
+});
+
+test('9hc-helper-pos6. set-project-root 单 positional mode 正常解析放行（反向，不误伤）', () => {
+  const dir = makeV6Project('spr-single-positional', { withIndex: false, detail: false });
+  const helper = runSetProjectRootHelper({ cwd: dir, args: ['independent'] });
+  assert.ok(!helper.stdout.includes('不支持参数'), '单 positional mode 不应误判 unknown：' + helper.stdout);
 });
 
 test('9hc-helper1b. reserve-artifact-id helper 在最小 v5 fixture 中不创建 changes', () => {
