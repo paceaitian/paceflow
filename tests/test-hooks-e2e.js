@@ -9155,6 +9155,59 @@ test('GOLDEN structural: DENY_REASONS 53 项 {escapeHatch,dirHint,teammateMode} 
   console.log(`  [GOLDEN] 表值: DENY_REASONS 53 项 {escapeHatch,dirHint,teammateMode} 逐项锁（DIRECT_ARTIFACT_EDIT dirHint:true 例外已锁）`);
 });
 
+// CHG-20260622-01 accepted-risk 锚定测试：锁定已知绕过【现状】（GS-1~4 + ES-1/ES-2，均 P3 backlog accepted-risk，非设计期望）。
+// 关联 finding-2026-06-21-guard-blocklist-enum-bypass-gs1-4 / finding-2026-06-22-embed-scan-ceiling-bypass-es1-large-file-es2-require。
+// 若某 false 断言变红 = 守卫收紧了（anchor 改进 / size 上限提高 / 跟随 require 图），请把该条期望改为 true（应拦）并确认收紧生效。
+// 对照组 CTRL 真值断言证 predicate 判别力（防平凡全 false 假绿）。artifact 路径运行时拼接，规避 dogfood embed-scan 自阻断。
+test('accepted-risk 锚定 GS-1~4：守卫 blocklist 枚举绕过现状锁（CTRL 应拦证判别力 / GS 当前绕过待收紧转 DENY）', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'arisk-gs-'));
+  const T = ['ta', 'sk.md'].join('');
+  const L = ['.pace', 'locks', 'a.lock'].join('/');
+  const LX = ['.pace', 'locks', 'x.lock'].join('/');
+  const rc = (c) => bashGuard.bashCommandMutatesArtifactRuntimeControl(c, cwd);
+  const art = (c) => bashGuard.bashCommandMutatesArtifact(c, cwd, cwd);
+  const psrc = (c) => powershellGuard.powershellCommandMutatesArtifactRuntimeControl(c, cwd);
+  // 对照组 CTRL：直接形态必须拦得住 → predicate 有判别力（非平凡全 false 假绿）。
+  assert.strictEqual(rc(`rm -f ${L}`), true, 'CTRL rm lock 应拦');
+  assert.strictEqual(rc(`while true; do rm -f ${L}; done`), true, 'CTRL while;do rm 应拦');
+  assert.strictEqual(rc(`for i in 1; do rm -f ${L}; done`), true, 'CTRL for;do rm 应拦');
+  assert.strictEqual(art(`sed -i "s/x/y/" ${T}`), true, 'CTRL sed -i task 应拦');
+  assert.strictEqual(psrc(`Remove-Item ${L}`), true, 'CTRL ps Remove-Item 应拦');
+  // GS-1 then/else/elif 后动词脱锚（bash-guard.js:14 MUTATING_ANCHOR allowLoops 只加 do）→ 收紧 anchor 时改为 true。
+  assert.strictEqual(rc(`if true; then rm -f ${L}; fi`), false, 'GS-1 if;then rm 绕过【现状，非期望】');
+  assert.strictEqual(rc(`if false; then :; else rm -f ${L}; fi`), false, 'GS-1 else rm 绕过【现状】');
+  assert.strictEqual(rc(`if false; then :; elif true; then rm -f ${L}; fi`), false, 'GS-1 elif rm 绕过【现状】');
+  // GS-2 eval 不解包（bash-guard.js:114 要求 eval ... bash|sh -c）。
+  assert.strictEqual(rc(`eval "rm -f ${L}"`), false, 'GS-2 eval rm 绕过【现状】');
+  assert.strictEqual(rc(`eval rm -f ${L}`), false, 'GS-2 eval bare 绕过【现状】');
+  // GS-3 行内编辑器漏枚举（bash-guard.js:17-25 INPLACE_EDITOR_SOURCE）。
+  assert.strictEqual(art(`ed ${T}`), false, 'GS-3 ed task 绕过【现状】');
+  assert.strictEqual(art(`vi -es ${T}`), false, 'GS-3 vi -es 绕过【现状】');
+  assert.strictEqual(art(`patch ${T} < p.diff`), false, 'GS-3 patch 绕过【现状】');
+  assert.strictEqual(rc(`ed ${LX}`), false, 'GS-3 ed lock 绕过【现状】');
+  // GS-4 powershell iex 不升格（powershell-guard.js:38-61）。
+  assert.strictEqual(psrc(`iex "Remove-Item ${L}"`), false, 'GS-4 iex 绕过【现状】');
+  assert.strictEqual(psrc(`Invoke-Expression 'Remove-Item ${L}'`), false, 'GS-4 Invoke-Expression 绕过【现状】');
+});
+
+test('accepted-risk 锚定 ES-1/ES-2：embed-scan 静态扫描天花板绕过现状锁（CTRL 小文件应拦 / ES 绕过待收紧）', () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'arisk-es-'));
+  const artDir = cwd;
+  const tgt = path.join(cwd, ['ta', 'sk.md'].join(''));
+  const wl = "require('fs')." + "write" + "FileSync(" + JSON.stringify(tgt) + ", 'x')"; // 拼接 write API 字面，规避 dogfood embed-scan 扫本测试文件
+  const E = (cmd) => bashGuard.bashCommandEmbedsArtifactWriteScript(cmd, cwd, artDir);
+  // 对照：小文件含 artifact 写 → embed-scan 应拦（判别力）。
+  const small = path.join(cwd, 'small.js'); fs.writeFileSync(small, wl);
+  assert.strictEqual(E(`node ${small}`), true, 'CTRL 小文件 artifact 写 应拦（embed-scan 判别力）');
+  // ES-1 >256KB 跳扫（bash-guard.js:486 size > 256*1024 continue）→ 提高上限/流式扫描时改为 true。
+  const big = path.join(cwd, 'big.js'); fs.writeFileSync(big, wl + "\n//" + 'x'.repeat(300 * 1024));
+  assert.strictEqual(E(`node ${big}`), false, 'ES-1 >256KB 跳扫绕过【现状】');
+  // ES-2 require 链不跟随（bash-guard.js:492 只重扫脚本文本、不跟 require/spawn 图）→ 跟随图时改为 true。
+  const b = path.join(cwd, 'b.js'); fs.writeFileSync(b, wl);
+  const a = path.join(cwd, 'a.js'); fs.writeFileSync(a, "require('./b')");
+  assert.strictEqual(E(`node ${a}`), false, 'ES-2 require 链不跟随绕过【现状】');
+});
+
 cleanupAll();
 
 const total = t.passed + t.failed;
