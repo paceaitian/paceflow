@@ -192,7 +192,7 @@ test -d "$ARTIFACT_DIR/changes" && echo EXISTS || echo MISSING
 
 ### 5. record-finding
 **必填**：`title` / `summary`（≤200）/ `type` / `impact` / `body`
-**可选**：`related-changes` / `merges` / `status`
+**可选**：`related-changes` / `merges` / `status`（=`rejected` 须带 `rejection-reason` ≥10 字符）
 
 ### 6. record-correction
 **必填**：`trigger-quote` / `wrong-behavior`（≥20 字符）/ `correct-behavior`（≥20 字符）/ `trigger-scenario` / `root-cause`
@@ -200,7 +200,7 @@ test -d "$ARTIFACT_DIR/changes" && echo EXISTS || echo MISSING
 
 ### 7. update-finding
 **必填**：`target`（finding-id）
-**可选（至少其一）**：`status`（迁移 open→investigating/accepted/rejected/merged/blocked；`rejected` 须带 `rejection-reason` ≥10 字符）/ `change-link` / `append`
+**可选（至少其一）**：`status`（迁移 open→investigating/accepted/rejected/merged/blocked；`rejected` 须带 `rejection-reason` ≥10 字符，`merged` 配 `merged-into` finding wikilink）/ `change-link` / `append`
 
 ### 8. update-index
 **必填**：`target`（`findings.md` | `corrections.md`）/ `action: reorder`

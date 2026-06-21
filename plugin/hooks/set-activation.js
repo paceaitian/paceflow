@@ -40,6 +40,9 @@ function parseArgs(argv) {
       else { args.session = String(argv[++i]); }
     } else if (arg.startsWith('-')) {
       args.unknown.push(arg);
+    } else {
+      // SA-1（v7.2.21 审计）：裸 positional 也 fail-closed 计入 unknown，与 CHG-20260620-01 加固的 4 helper 对称
+      args.unknown.push(arg);
     }
   }
   args.cwd = args.cwd ? path.resolve(args.cwd) : paceUtils.resolveProjectCwd();

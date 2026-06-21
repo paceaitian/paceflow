@@ -287,6 +287,14 @@ test('有 <!-- ARCHIVE --> → 返回标记前内容', () => {
   assert.strictEqual(readActive(dir, 'test.md'), 'active part\n');
 });
 
+test('ARCHIVE 标记行带尾随空格 → 仍返回标记前内容（CA-1：与 findActiveIndexBelowArchive 容忍版对齐，防归档区 entry 冒泡回活跃）', () => {
+  const dir = makeTmpDir('ra-archive-trailing');
+  // 外部编辑器易在标记行尾留空格；不容忍会导致 readActive 退回全文、归档 [x]/[-] 行被当活跃
+  const content = 'active part\n<!-- ARCHIVE --> \nold stuff\n';
+  fs.writeFileSync(path.join(dir, 'test.md'), content);
+  assert.strictEqual(readActive(dir, 'test.md'), 'active part\n');
+});
+
 test('文件不存在 → null', () => {
   const dir = makeTmpDir('ra-missing');
   assert.strictEqual(readActive(dir, 'nonexistent.md'), null);

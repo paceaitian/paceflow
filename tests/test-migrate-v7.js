@@ -212,7 +212,8 @@ function snapshotAll(dir) {
       const p = path.join(d, name);
       const st = fs.statSync(p);
       if (st.isDirectory()) walk(p);
-      else files[path.relative(dir, p)] = fs.readFileSync(p, 'utf8');
+      // TH-1b（v7.2.21 审计）：key 用 path.sep→'/' 归一，Windows 反斜杠 key 才能匹配测试里的正斜杠字面量（如 V7E-6 'changes/chg-...md'）；POSIX 下 path.sep==='/' 归一是恒等。
+      else files[path.relative(dir, p).split(path.sep).join('/')] = fs.readFileSync(p, 'utf8');
     }
   };
   walk(dir);

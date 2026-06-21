@@ -21,7 +21,7 @@ description: >
 
 > 本 skill 的核心价值是**独立发现问题**，不是照 guidebook/action-plan/README 打勾。
 
-> **方法论内核见可发布通用版** [`review-methodology.md`](../../../plugin/skills/pace-workflow/references/review-methodology.md)（独立发现 / 证据优先级 / 报告全部再验证 / 三件武器 / 严重度纪律 / 误报防御七条 / 记录基线）。本内部 skill 不重复方法论本体，只在其上**叠加 PaceFlow 专用靶子**——下面的证据优先级具体路径、审查范围 Glob、五维度并行划分、v6 审计基线。两处共用同一套方法论，避免漂移。
+> **方法论内核见可发布通用版** [`review-methodology.md`](../../../plugin/skills/pace-workflow/references/review-methodology.md)（独立发现 / 证据优先级 / 报告全部再验证 / 三件武器 / 严重度纪律 / 误报防御七条 / 记录基线）。本内部 skill 不重复方法论本体，只在其上**叠加 PaceFlow 专用靶子**——下面的证据优先级具体路径、审查范围 Glob、五维度并行划分、v7 审计基线。两处共用同一套方法论，避免漂移。
 
 证据优先级：
 
@@ -45,10 +45,10 @@ description: >
 - 不要一次性对 `pace-utils.js`、`pre-tool-use.js`、长文档或整个大区间跑无界 `git diff`。
 - 长文件读取优先用 `rg` 定位函数/标题，再 `sed -n` 读取小范围。
 
-当前 v6 审计基线：
+当前 v7 审计基线：
 
 - marketplace `source` 指向 `./plugin`；发布面是 4 个用户 skill + `artifact-writer` agent + hooks/agent-references/migrate；`internal/skills/audit/`、docs、tests、tickets 不随 marketplace 发布
-- v6-only `changes/**` 详情模型；v5 活跃流程只允许迁移/桥接，不继续兼容
+- v7 `changes/**` 详情模型；v5 活跃流程只允许迁移/桥接，不继续兼容
 - artifact root 可为 local/vault/custom，真实 git worktree 沿用宿主项目 `.pace/artifact-root`
 - `artifact-writer` 是唯一 artifact 写入者；主 session 不得直写 C/V/R 标记（含 `<!-- REVIEWED -->` 与 frontmatter `reviewed-date`）
 - 项目级 `artifact-writer.lock` 串行化 shared artifact 写入；Bash 不得修改该锁
@@ -98,7 +98,7 @@ description: >
 | 1. 代码质量 | 核心 Hook（公共模块 + Write/Edit hook） | Bug/正则/路径/异常/I/O 协议 |
 | 2. 流程完整性 | 生命周期 Hook（SessionStart/Stop/PreCompact） | stdin 解析/防循环/快照/降级 |
 | 3. 一致性 | 辅助 Hook + Plugin + Agent 发布资产 | hooks.json/plugin/agents 一致性 |
-| 4. Skill 模板 | 用户 Skill + 内部 audit + 模板 | v6 口径/交叉引用/格式/正则兼容 |
+| 4. Skill 模板 | 用户 Skill + 内部 audit + 模板 | v7 口径/交叉引用/格式/正则兼容 |
 | 5. 架构优化 | 测试 + 文档 + 整体架构 | agent contract 覆盖度/文档准确性/流程缺口 |
 
 > 每个 agent 的完整 prompt 和共享审查纪律见 [references/agent-prompts.md](references/agent-prompts.md)。

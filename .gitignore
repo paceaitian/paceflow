@@ -41,3 +41,6 @@ docs/plans/
 
 # Hook 消息参考文档（本地开发用）
 docs/hook-messages-reference.md
+
+# 审计一手实证 harness（v7.2.21 GS-1~4 守卫绕过验证工具，备查不分发）
+internal/audit/

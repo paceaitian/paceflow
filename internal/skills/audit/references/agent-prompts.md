@@ -17,7 +17,7 @@
 4. **路径追踪**：报告逻辑错误时，必须从"问题行"沿控制流追踪到入口点，确认执行路径可达。
 5. **实际对比**：声称"不一致"时，必须真正读取并对比两个文件的实际内容，不能凭记忆。
 6. **动态发现**：使用 Glob 发现文件，不假设文件数量或名称。发现的数量与文档不同本身可能是一个发现。
-7. **当前 v6 基线**：marketplace `source` 指向 `./plugin`；发布面是 4 个用户 skill + `artifact-writer` agent + hooks/agent-references/migrate；`internal/skills/audit`、docs、tests、tickets 不发布；v5 活跃流程只允许迁移/桥接；artifact-writer 写入时持真实 artifact resource lock；legacy `.pace/artifact-writer.lock` 只作为跨版本兼容阻断信号。
+7. **当前 v7 基线**：marketplace `source` 指向 `./plugin`；发布面是 4 个用户 skill + `artifact-writer` agent + hooks/agent-references/migrate；`internal/skills/audit`、docs、tests、tickets 不发布；v5 活跃流程只允许迁移/桥接；artifact-writer 写入时持真实 artifact resource lock；legacy `.pace/artifact-writer.lock` 只作为跨版本兼容阻断信号。
 8. **不要追求提示词 100% 服从**：报告格式 warning、模型偶发拆分操作等，除非造成 artifact 错写、hook 误放行或阻塞循环，否则降级为 W/I。
 9. **Phase 1 不预筛选**：报告所有可疑发现，严重度单独标注；不要因为“可能低优先级”或“文档问题”提前丢弃。
 10. **防 stall**：大文件或大区间审计先用 `git log --stat <range> -- <file>` 定位 commit，再用 `git show <sha> -- <file>` 逐个读取；不要一次性无界 diff 长文件。
@@ -173,7 +173,7 @@ A. 辅助 Hook — Bug/I/O 协议/功能正确性/teammate 降级逻辑
 B. Plugin 结构 — plugin.json/marketplace/PACE_VERSION 版本一致性、hooks.json 事件覆盖完整性+matcher+command 路径
 C. 发布面 — marketplace `source` 应为 `./plugin`，发布 4 个用户 skill + `artifact-writer` + hooks/refs/migrate，不得发布 `internal/skills/audit`、docs、tests、tickets
 D. Agent 发布资产 — `plugin/agents/artifact-writer.md` 与 `plugin/agent-references/**` 是否随 plugin runtime 可用
-E. v6 注册一致性 — hooks 输出是否都指向 agent-driven artifact workflow，禁止 v5 活跃 fallback；v5 只能迁移/桥接
+E. v7 注册一致性 — hooks 输出是否都指向 agent-driven artifact workflow，禁止 v5 活跃 fallback；v5 只能迁移/桥接
 F. 本地验证脚本 — 如存在，只检查 smoke 覆盖，不把缺少安装功能报为发布阻塞
 ```
 
@@ -203,7 +203,7 @@ F. 本地验证脚本 — 如存在，只检查 smoke 覆盖，不把缺少安�
 ### Step 2：审查维度
 
 A. 模板完整性 — ARCHIVE 标记存在性、Checkbox 格式、ID 格式、时间戳格式
-B. Skill 内容 — v6-only 规则完整性/准确性/可执行性、跨 Skill 矛盾、状态标记一致性
+B. Skill 内容 — v7 规则完整性/准确性/可执行性、跨 Skill 矛盾、状态标记一致性
 C. 关键语义 — artifact root local/vault/custom、v5 migration guard、approve-and-start、close-chg、review/REVIEWED（`action=review` 与 `action=verify` 同构、`close-chg` 折叠 REVIEWED）、任务局部 T-NNN、worktree 共用 artifact 是否讲清楚
 D. 引用有效性 — 交叉引用路径（Read 验证）、Hook 名称匹配、版本号一致；引用文档过时需与代码核对后再报
 E. 模板与 Hook 联动 — Hook 正则 vs 模板格式兼容性、模板路径正确性
@@ -234,7 +234,7 @@ F. 可执行性 — AI 能否无歧义执行、遗漏边界情况；不得要求
 ### Step 2：审查维度
 
 A. 测试覆盖度 — 未测试函数、Hook E2E、agent contract fixture、production smoke、脆弱测试
-B. 文档准确性 — README/CLAUDE/REFERENCE 是否 v6-only，数量声称 vs Glob，是否误导主 session 直接写 artifact
+B. 文档准确性 — README/CLAUDE/REFERENCE 是否 v7 口径，数量声称 vs Glob，是否误导主 session 直接写 artifact
 C. 架构评估 — P-A-C-E-V 各阶段 hook+agent 保障、误阻塞风险、异常降级、.pace/ 多会话可靠性、worktree 并发写锁
 D. 生产回归 — 对照 production smoke/log/session JSONL 中真实发生的问题，确认是否已有测试或仍有缺口
 E. 简化机会 — 过度工程、分工合理性、不必要复杂性

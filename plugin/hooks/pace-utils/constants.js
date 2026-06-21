@@ -2,7 +2,7 @@ const path = require('path');
 
 const HOOKS_DIR = path.resolve(__dirname, '..');
 
-const PACE_VERSION = 'v7.2.21';
+const PACE_VERSION = 'v7.2.22';
 // CHG-20260616-01 T-002：补无歧义主流语言扩展名——让写码门对这些语言用户也能启动（确定性门是兜底非
 // 攻防完备：歧义项 .m/.r/.pl/.sql 故意不补，over-block 代价 > under-block，宁漏不误伤）。
 // 注意双消费：除写码门(isCodeFile)外，本集合还供 countCodeFiles → detectSoftSignal/SOFT_WARN 软提示复用
@@ -49,7 +49,9 @@ const MIGRATE_V7_SCRIPT = path.resolve(HOOKS_DIR, '..', 'migrate', 'migrate-v7.j
 const PACE_ARTIFACT_ROOT_CONTENT = 'spec.md / task.md / walkthrough.md / findings.md / corrections.md / changes/**';
 
 const ARCHIVE_MARKER = '<!-- ARCHIVE -->';
-const ARCHIVE_PATTERN = /^<!-- ARCHIVE -->\r?$/m;
+// CA-1（v7.2.21 审计）：容忍标记行尾随空格，与 change-analysis.js findActiveIndexBelowArchive 的 [ \t]*$ 对齐——
+// 否则尾随空格时 readActive 匹配不到 → 退回全文 → 归档区 [x]/[-] 行被当活跃 entry 冒泡回活跃集。
+const ARCHIVE_PATTERN = /^<!-- ARCHIVE -->[ \t]*\r?$/m;
 
 const SKILL_DIRS = [
   'pace-workflow',

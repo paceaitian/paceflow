@@ -2959,6 +2959,13 @@ test('9hc-helper-pos6. set-project-root 单 positional mode 正常解析放行�
   assert.ok(!helper.stdout.includes('不支持参数'), '单 positional mode 不应误判 unknown：' + helper.stdout);
 });
 
+test('9hc-helper-pos7. set-activation 多余 positional → fail-closed（SA-1：CHG-20260620-01 漏的第 5 个写 .pace 状态 helper）', () => {
+  const dir = makeV6Project('setactivation-extra-positional', { withIndex: false, detail: false });
+  const helper = runSetActivationHelper({ cwd: dir, args: ['--status', 'extra-junk', '--cwd', dir] });
+  assert.strictEqual(helper.code, 2);
+  assert.ok(helper.stdout.includes('不支持参数'), 'set-activation 多余 positional 应 fail-closed（非静默丢弃）：' + helper.stdout);
+});
+
 test('9hc-helper1b. reserve-artifact-id helper 在最小 v5 fixture 中不创建 changes', () => {
   const dir = makeTmpDir('agent-reserve-helper-v5-minimal');
   fs.mkdirSync(path.join(dir, '.pace'), { recursive: true });
@@ -8790,14 +8797,31 @@ const GOLDEN_TEAM_ENV = { CLAUDE_CODE_TEAM_NAME: 'golden-exec-team' };
 // today() \u5f52\u4e00\u9632 native-plan \u6587\u6848\u91cc\u7684\u8ba1\u5212\u6587\u4ef6\u65e5\u671f\uff08${today()}-feature.md\uff09\u6b21\u65e5\u6f02\u79fb\u3002
 function goldenNormalize(text, dir) {
   let s = String(text);
-  if (dir) s = s.split(dir).join('<DIR>');
-  s = s.split(_vaultTmpDir).join('<VAULT>');
-  s = s.split(HOOKS_DIR).join('<HOOKS>');
-  s = s.split(GOLDEN_REPO_ROOT).join('<REPO>');
+  // TH-1a（v7.2.21 审计）：每个路径 token 同时替换 OS 原生形态与正斜杠形态——hook 输出经
+  // normalizePath 多为正斜杠，Windows 本机这些 token 含反斜杠，单形态 split 漏替换致 21 个 GOLDEN 快照漂移。
+  // POSIX 下 token 无反斜杠（fwd===token）跳过第二次替换，行为与原单形态完全幂等。
+  const subPath = (token, placeholder) => {
+    if (!token) return;
+    s = s.split(token).join(placeholder);
+    const fwd = token.replace(/\\/g, '/');
+    if (fwd !== token) s = s.split(fwd).join(placeholder);
+  };
+  subPath(dir, '<DIR>');
+  subPath(_vaultTmpDir, '<VAULT>');
+  subPath(HOOKS_DIR, '<HOOKS>');
+  subPath(GOLDEN_REPO_ROOT, '<REPO>');
   s = s.split(today()).join('<TODAY>');
   s = s.split(today().replace(/-/g, '')).join('<TODAYC>'); // reserved-id 紧凑日期 CHG-YYYYMMDD-NN
   return s;
 }
+
+// TH-1a 针对性单测：在 POSIX 也能判别双形态归一是否生效（喂 Windows 反斜杠 dir + 正斜杠文本）。
+test('TH-1a: goldenNormalize 路径 token 反斜杠+正斜杠双形态归一（Windows GOLDEN 快照可移植）', () => {
+  const winDir = 'C:\\Users\\me\\proj';                                  // 模拟 Windows OS 原生反斜杠路径
+  const out = goldenNormalize('target is C:/Users/me/proj/changes/a.md done', winDir); // hook 文本是正斜杠形态
+  assert.ok(out.includes('<DIR>'), 'TH-1a: 正斜杠形态路径应归一为 <DIR>：' + out);
+  assert.ok(!out.includes('C:/Users/me/proj'), 'TH-1a: 不应残留正斜杠真实路径：' + out);
+});
 
 // \u9a71\u52a8\u771f hook\uff0c\u5f52\u4e00\u540e\u62bd\u51fa {decision, text}\u3002deny\u2192permissionDecisionReason\uff1b\u8f6f\u5316\u2192additionalContext\u3002
 function goldenCapture({ cwd, stdin, env = {}, normDir }) {
