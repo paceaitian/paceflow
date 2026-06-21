@@ -1391,13 +1391,26 @@ test('首次启用且 vault/local 都无 changes → 需要选择 artifact root'
   assert.strictEqual(artifactRootChoiceNeeded(dir), true);
   const msg = artifactRootChoiceMessage(dir);
   assert.ok(msg.includes('AskUserQuestion'));
-  assert.ok(msg.includes(getArtifactRootChoicePath(dir)));
+  assert.ok(msg.includes(getArtifactRootChoicePath(dir).replace(/\\/g, '/')), 'HOTFIX-20260621-01：配置文件路径显示归一正斜杠（Windows 也匹配）');
   assert.ok(msg.includes('配置文件'), '应明确 artifact-root 是配置文件');
   assert.ok(msg.includes('不是 artifact 根目录'), '应明确配置文件不是 artifact 根目录');
 	  assert.ok(msg.includes('只用于 PaceFlow artifacts'), '应明确 artifact_dir 的边界');
   assert.ok(msg.includes('set-artifact-root.js'), '应给出 artifact-root helper 路径');
 	  assert.ok(msg.includes('reserve-artifact-id.js'), '应给出当前 helper 路径');
   assert.ok(msg.includes('不接受 --artifact-dir / --artifact-root / --project-dir'), '应明确 helper 不接受自造 artifact/root/project 参数');
+});
+
+// HOTFIX-20260621-01 守卫判别测试：注入 Windows 反斜杠路径，证明显示边界归一生效（POSIX 也判别，非平凡通过）。
+test('HOTFIX-20260621-01: formatArtifactDirHint 对 Windows 反斜杠 choicePath/stateDir 显示归一正斜杠（同行三路径分隔符一致，防 GOLDEN 漂移）', () => {
+  const hint = paceUtils.formatArtifactDirHint({
+    artDir: 'C:\\proj',
+    choice: 'local',
+    choicePath: 'C:\\proj\\.pace\\artifact-root',
+    stateDir: 'C:\\proj',
+    mode: 'independent',
+  });
+  assert.ok(!hint.includes('\\'), 'HOTFIX：hint 不应含反斜杠（跨平台一致性契约）：' + hint);
+  assert.ok(hint.includes('配置文件=C:/proj/.pace/artifact-root'), 'HOTFIX：choicePath 应归一为正斜杠：' + hint);
 });
 
 test('helper 脚本常量使用绝对当前 runtime 路径', () => {

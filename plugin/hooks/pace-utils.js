@@ -310,7 +310,7 @@ function artifactRootConfigError(cwd) {
       choicePath,
       message: [
         'PACEflow artifact-root 配置为 vault，但当前 hook 进程没有 PACE_VAULT_PATH，无法解析 Obsidian vault artifact 根目录。',
-        `配置文件: ${choicePath}`,
+        `配置文件: ${choicePath.replace(/\\/g, '/')}`,
         '为避免把 artifact 静默写到本地项目目录，本次操作已停止。',
         '请恢复 PACE_VAULT_PATH 后重试；或如果确实要改用本地 artifact，请将配置文件内容改为纯文本 local。'
       ].join('\n')
@@ -387,7 +387,7 @@ function artifactRootChoiceMessage(cwd) {
     `本地项目 artifact 根目录: ${displayDir(stateDir)}`,
     '请用 AskUserQuestion 询问用户选择 "Obsidian vault project" 或 "本地项目目录"（至少两个选项）。',
     `用户选择后，运行 artifact-root helper 写入配置：node "${SET_ARTIFACT_ROOT_SCRIPT}" --choice local 或 --choice vault`,
-    `配置文件: ${choicePath}`,
+    `配置文件: ${choicePath.replace(/\\/g, '/')}`,
     '该配置文件不是 artifact 根目录。',
     `artifact_dir 只用于 PaceFlow artifacts：${PACE_ARTIFACT_ROOT_CONTENT}。`,
     `配置写入后再从目标项目 cwd 运行 reserve helper：node "${RESERVE_ARTIFACT_ID_SCRIPT}" --operation create-chg --cwd "${path.resolve(cwd).replace(/\\/g, '/')}"`,
@@ -396,13 +396,20 @@ function artifactRootChoiceMessage(cwd) {
   ].join('\n');
 }
 
+// 渲染纯函数（HOTFIX-20260621-01）：从 artifactDirRuntimeHint 抽出，便于注入 Windows 反斜杠路径做归一判别测试。
+// choicePath/stateDir 在显示边界统一正斜杠归一，避免同一行三路径分隔符不一致（Windows 上 choicePath 裸插反斜杠是 GOLDEN 漂移根因）。
+function formatArtifactDirHint({ artDir, choice, choicePath, stateDir, mode }) {
+  return `Artifact 根目录：${displayDir(artDir)}（选择=${choice}；配置文件=${String(choicePath).replace(/\\/g, '/')}；Project Root=${String(stateDir).replace(/\\/g, '/')}；mode=${mode}；仅用于 ${PACE_ARTIFACT_ROOT_CONTENT}）`;
+}
+
 function artifactDirRuntimeHint(cwd) {
-  const artDir = getArtifactDir(cwd);
-  const stateDir = getProjectStateDir(cwd);
-  const rootInfo = resolveEffectiveProjectRoot(cwd);
-  const choice = readArtifactRootChoice(cwd) || 'auto';
-  const choicePath = getArtifactRootChoicePath(cwd);
-  return `Artifact 根目录：${displayDir(artDir)}（选择=${choice}；配置文件=${choicePath}；Project Root=${stateDir.replace(/\\/g, '/')}；mode=${rootInfo.mode}；仅用于 ${PACE_ARTIFACT_ROOT_CONTENT}）`;
+  return formatArtifactDirHint({
+    artDir: getArtifactDir(cwd),
+    choice: readArtifactRootChoice(cwd) || 'auto',
+    choicePath: getArtifactRootChoicePath(cwd),
+    stateDir: getProjectStateDir(cwd),
+    mode: resolveEffectiveProjectRoot(cwd).mode,
+  });
 }
 
 function appendArtifactDirHint(cwd, message) {
@@ -906,7 +913,7 @@ module.exports = {
   isArtifactRuntimeControlPath, operationFromAgentPrompt, changeIdFromAgentPrompt, explicitChangeTargetFromAgentPrompt,
   getChangeOwnerPath, readChangeOwner, writeChangeOwner, markChangeOwnerClosed, touchChangeOwnersForSession, detachChangeOwnersForSession, reviveDetachedChangeOwnersForSession, changeOwnerStatus, ownerTakeoverConfirmed,
   sessionPausePath, writeSessionPause, clearSessionPause, isSessionPaused,
-  artifactRootConfigError, artifactRootChoiceNeeded, artifactRootChoiceMessage, artifactDirRuntimeHint, appendArtifactDirHint, ensureProjectInfra,
+  artifactRootConfigError, artifactRootChoiceNeeded, artifactRootChoiceMessage, artifactDirRuntimeHint, formatArtifactDirHint, appendArtifactDirHint, ensureProjectInfra,
   // 文件读写
   readActive, readFull, checkArchiveFormat, createTemplates, normalizeLineEndings, hasNonNullVerifiedDate, hasNonNullReviewedDate, detectUnmigratedV6Layout, MIGRATE_V7_SCRIPT,
   // 计划文件
