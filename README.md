@@ -1,5 +1,7 @@
 # PACEflow
 
+[![ci](https://github.com/paceaitian/paceflow/actions/workflows/ci.yml/badge.svg)](https://github.com/paceaitian/paceflow/actions/workflows/ci.yml)
+
 > **PACEflow 是一套 Claude Code hook，强制 AI 编码按「先规划、获批，再写代码、验证、收尾」的顺序走——靠在工具调用层拦截，而不是靠提示词提醒。**
 
 ## 核心理念
@@ -10,7 +12,7 @@
 - 不抓 bug、不管代码质量。代码好坏取决于 AI 能力和你的测试、review，流程管不了。
 - 不替你写 spec、不替你做设计，它不产出任何内容。
 - 不判断你「验证得对不对、审计得够不够」，它只确认这些步骤发生过、留了记录，内容对错交给人。
-- 不防 AI 或你刻意绕过。你随时能关掉它；它防的是无意的跳步和遗忘，不是蓄意作弊。
+- 不锁死你的工作流：随时可暂停或停用（`/paceflow:pause` `/paceflow:resume` `/paceflow:disable`）。
 
 ### 它做什么
 
@@ -471,6 +473,7 @@ paceflow/
 
 | 版本 | 日期 | 主要变更 |
 |------|------|----------|
+| v7.2.28 | 2026-06-22 | **工程卫生收尾——修 FSW-1 + 补齐 monitor-guard 对称模块 + README 定位 trim/CI badge（CHG-20260622-04/05）**：CI 三平台绿后的工程卫生一批（含此前攥着的 README 改动一并发）。**FSW-1（CHG-04）**——`migrate/fix-slug-wikilinks.js` 的 parseArgs 加未知参数 fail-closed，`--dryrun` 等拼写错误从静默吞真写 artifact 改为报错 exit 2，对齐 CHG-20260620-01 给其他 CLI helper 补的 unknown-flag 对称（17 条 finding backlog triage 判定的唯一日常可达真 bug）。**monitor-guard（CHG-05）**——深度研究 pre-tool-use.js（1438 行）结论：之前 `eca8c7c` 已抽走 5 个 guard 模块、剩 80% 是必要 dispatch 编排内聚（硬拆高风险 + `GOLDEN structural` 按源文本锁 DENY_REASONS 的陷阱），故只做唯一低风险一致性抽取——把 Monitor 两段 deny 文案构造器（`monitorArtifact*DenyReason`）逐字搬进新 `pre-tool-use/monitor-guard.js`（与 bash/powershell guard 对称，Monitor 命令检测复用 bash 探测器故只承载文案），`isMonitorTool` 按惯例留主文件；+3 MON 单测把原仅 substring 松覆盖的 Monitor 文案提升为关键句级。**诚实记录**：codex「拆巨型 hook」对当前 pre-tool-use.js 基本不成立，不为减行数硬拆 dispatch 核心。**README**——定位段删一行替蓄意破坏写的防御性免责（「不防刻意绕过/蓄意作弊」属对着防风打火机吹气、不入说明书）改为中性的暂停/停用说明 + 顶部加 CI badge。`node tests/run-all.js` 8/8（pace-utils 305 +MON-1/2/3、hooks-e2e 含 Monitor dispatch + 读源文本 structural 测试全绿证行为零改变）。附 findings backlog 一次性 disposition：FSW-1 标 accepted、SO-1 stale + 7 条 won't-fix（ES/E5/LK-1/GS/emit-deny-log/foreign-worktree/budget-head）标 rejected、CHG-20260622-03（ROI）取消归档，active backlog 17→7。 |
 | v7.2.27 | 2026-06-22 | **修 run-all 的 plugin-validate 在 Windows spawn 失败——`claude.cmd` shim 需 shell 解析（CHG-20260622-02 T-003 Windows 收尾）**：v7.2.26 CI 进展到 **ubuntu ✅ + macos ✅**（hermetic 修复生效），仅剩 **windows-latest ❌**，且精确隔离到 `plugin-validate` 单套件、**3ms 瞬挂**——其余 7 套件（含 pace-utils、agent-helpers 的 /tmp 修复）Windows 全绿。根因：`run-all.js:78` 用 `execFileSync('claude', args)` 跑 plugin-validate，而 Windows 上 `npm install -g @anthropic-ai/claude-code` 装的是 `claude.cmd` shim，Node 的 execFileSync 不走 PATHEXT 解析 `.cmd`（且新版 Node 出于安全禁止无 shell 直跑 `.cmd`/`.bat`）→ ENOENT 瞬挂。修法：plugin-validate 套件加 `shell: process.platform === 'win32'`，execFileSync 透传 `shell: s.shell`——Windows 经 cmd.exe 的 PATHEXT 解析 `claude.cmd`，POSIX 保持 `shell:false` 行为不变（仅此一个非 node 命令需要，node 套件用 `process.execPath` 绝对路径无碍）。验证：POSIX `node tests/run-all.js` 8/8（plugin-validate/run-all-self 不回归）；Windows 端只能由 CI 实测验证（再次印证「Windows 不可本地自证」）。纯测试基建改动。三平台 CI 全绿后 CHG-20260622-02 T-003 闭环。 |
 | v7.2.26 | 2026-06-22 | **CI 首跑即抓到价值——修 pace-utils 21 测试非自洽（依赖 ambient `PACE_VAULT_PATH` 的假绿）**（CHG-20260622-02 T-003 闭环）：v7.2.25 的三平台 CI 首跑**全三平台**（含 ubuntu，与维护者本地同 POSIX 环境）都挂 `run-all 7/8`——失败的不是平台、也不是新增的 /tmp 改动，而是 `pace-utils` 21 个 vault/PACE_PROJECT_NAME/scanRelatedNotes/WIKI 测试。根因：`constants.js:28 VAULT_PATH = process.env.PACE_VAULT_PATH || ''` 在 require 时固化，而 `test-pace-utils.js` require 前从不设 env，于是这些测试**依赖维护者 shell 的 ambient `PACE_VAULT_PATH`**——干净环境（CI 无此变量）下 `VAULT_PATH=''`、`path.join('','projects',name)` 退化为相对路径 `projects/<name>` 致断言崩。本地长期 `8/8` 全靠 shell 变量撑出的**假绿**，CI 第一次在干净环境跑 `run-all` 就抓到了（印证「干净环境与目标平台一样不可本地自证」，扩展 [[cross-platform-fix-needs-target-platform-run]]）。修法：`test-pace-utils.js` 在 require pace-utils **之前**把 `PACE_VAULT_PATH` 固定为进程私有临时 vault 根（`os.tmpdir()/pace-test-vault-root`），让测试自洽（hermetic），副带不再污染真实 Obsidian vault。验证：`env -u PACE_VAULT_PATH node tests/run-all.js` 8/8（pace-utils 302/302，本地精确复现并消除 CI 干净环境失败）；手动 R 复核无 P0-P2。纯测试改动，不动 marketplace runtime。三平台 CI 转绿后 CHG-20260622-02 T-003 闭环。 |
 | v7.2.25 | 2026-06-22 | **GitHub Actions 三平台 CI 矩阵 + 修 agent-helpers `/tmp` 硬编码（跨平台工程底座）**（CHG-20260622-02）：承接 codex v7.2.21 方向建议最高优先级之一——机制化解「主 session 只能 POSIX/WSL 跑、无法验 Windows」的结构性盲区（v7.2.22 正因 POSIX 8/8 推断 Windows、实际 7/8 翻车，靠维护者手动实跑兜住，见记忆 cross-platform-fix-needs-target-platform-run）。**T-001（修 /tmp 硬编码）**——抽 `subagent-runner.js` 的 `defaultVaultRoot()=os.tmpdir()/pace-test-vault` + `defaultVaultDir(fixture)` 为临时 vault 路径单一来源并 export，替换原硬编码 `/tmp/test-vault/${fixture}`（Windows 不识别 /tmp、落 C:\tmp 污染跨盘）；落地核实实为 **34 个** YAML case（非草案误写的 4 个）各有一行冗余 `project_path: /tmp/test-vault/<fixture>`（值恒等默认、纯重述 setup.fixture）全删（variables 留 date）；`run-tests.js` 三处默认（cmdVerify/cmdTeardown/cmdVerifyMulti）+ `run-agent-cli-suite.sh`（case_target_dir/--add-dir，去 python3 依赖）全接单源；`fixture-teardown.js` 安全门从 `startsWith('/tmp/')` 改「path.resolve 后严格位于 os.tmpdir() 之下（含 sep 防兄弟前缀）」跨平台判据；`.gitattributes` 补 `*.yaml`/`*.yml eol=lf`（Windows 护城河）。**T-002（CI yml）**——`.github/workflows/ci.yml`：三平台矩阵 ubuntu/macos/windows-latest + fail-fast:false + checkout fetch-depth:0 + node 20 + 装 claude CLI（plugin-validate 纯本地校验无 API key）+ `node tests/run-all.js`；**落地核实修正**：`git rev-parse --show-toplevel` = paceflow 本身（git 根即 paceflow），删掉草案里会致 CI 失败的 `working-directory: paceflow`（无此目录）。**R 对抗审计（opus inline）无 P0/P1**：P2-1 抓到 rename test-vault→pace-test-vault 自引入的 sh harness 分叉（--add-dir 授权错目录致 live harness 在维护者 Linux 全 FAIL）→ 本 CHG 内修；P2-2 doc 过时（README/baseline/smoke）→ 本 CHG 内修 current-impl 部分。`node tests/run-all.js` 8/8（agent-helpers 11/11、helper 代码无 /tmp 字面）。**T-003 三平台真绿待 push 后 GitHub Actions 首跑实测**（头号观察点 windows-latest 的 agent-helpers 退出码），CI 绿后 close-chg。含 `docs/research-2026-06-22-ci-roi-feasibility-and-rollout.md` 调研文档。 |
@@ -583,4 +586,4 @@ v5 历史快照见 `CHANGELOG.md`；v6 当前历史以本表为准。
 
 ---
 
-**版本**: v7.2.27 | **运行时**: Node.js | **平台**: Windows / macOS / Linux | **协议**: PACE (Plan-Artifact-Check-Execute-Verify-Review)
+**版本**: v7.2.28 | **运行时**: Node.js | **平台**: Windows / macOS / Linux | **协议**: PACE (Plan-Artifact-Check-Execute-Verify-Review)

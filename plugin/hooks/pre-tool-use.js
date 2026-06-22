@@ -62,6 +62,10 @@ const {
   powershellArtifactDenyReason,
 } = require('./pre-tool-use/powershell-guard');
 const {
+  monitorArtifactRuntimeControlDenyReason,
+  monitorArtifactDenyReason,
+} = require('./pre-tool-use/monitor-guard');
+const {
   isArtifactWriterAgentTool,
   extractPromptArtifactDir,
   promptHasExactArtifactDir,
@@ -201,22 +205,6 @@ function commandExecutionLooksMutating(toolName, command) {
 function getArtifactRelIfRelevant(toolName, paceSignal, artDir, filePath) {
   if (!isFileMutationTool(toolName) || !paceSignal) return null;
   return paceUtils.artifactRelativePathForFile(artDir, filePath);
-}
-
-function monitorArtifactRuntimeControlDenyReason(command) {
-  return [
-    '禁止使用 Monitor 修改 PaceFlow artifact 写入控制运行态。锁、编号计数与 reservation 只能由 hook 创建/释放。',
-    '如果需要观察日志或测试输出，请让 Monitor 执行只读命令；不要用 Monitor 删除或改写 PaceFlow 运行态文件。',
-    `被拦截的命令：${String(command || '').slice(0, 500)}`
-  ].join('\n');
-}
-
-function monitorArtifactDenyReason(command) {
-  return [
-    '禁止使用 Monitor 修改 artifact 文件。Monitor 只适合观察日志、测试输出或轮询状态；artifact 修改必须走 artifact-writer 的 Write/Edit 路径。',
-    '允许用 Monitor 执行只读观察命令，但禁止 sed -i、重定向、rm/mv/cp/touch/mkdir、脚本写文件等会改变 artifact 的命令。',
-    `被拦截的命令：${String(command || '').slice(0, 500)}`
-  ].join('\n');
 }
 
 function isUnderDir(baseDir, targetPath) {

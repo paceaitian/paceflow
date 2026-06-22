@@ -20,6 +20,7 @@ const cmdRecognition = require('../plugin/hooks/pre-tool-use/command-recognition
 const bashGuard = require('../plugin/hooks/pre-tool-use/bash-guard');
 const powershellGuard = require('../plugin/hooks/pre-tool-use/powershell-guard');
 const lifecycleGuard = require('../plugin/hooks/pre-tool-use/agent-lifecycle-guard');
+const monitorGuard = require('../plugin/hooks/pre-tool-use/monitor-guard');
 const subagentStop = require('../plugin/hooks/subagent-stop');
 const createPlanUtils = require('../plugin/hooks/pace-utils/plans');
 const createLockUtils = require('../plugin/hooks/pace-utils/locks');
@@ -664,6 +665,31 @@ test('powershell-guard RES-GUARD: `n/`r 语句分隔后的 mutating 识别（PSG
   // 回归护栏：`s 等非分隔转义仍剥成字面（ta`sk.md → task.md，PSG-03 原行为）
   const dir = makeTmpDir('ps-backtick-regress');
   assert.ok(powershellGuard.powershellCommandReferencesArtifact('Set-Content ta`sk.md x', dir, dir), 'ta`sk.md 仍匹配 task.md');
+});
+
+// ============================================================
+// monitor-guard：Monitor 工具的两段 artifact deny 文案构造器（CHG-20260622-05 抽出）
+// ============================================================
+console.log('\n--- monitor-guard ---');
+
+test('MON-1. monitorArtifactRuntimeControlDenyReason 含运行态拒绝核心句 + 命令回显', () => {
+  const r = monitorGuard.monitorArtifactRuntimeControlDenyReason('rm .pace/locks/x');
+  assert.ok(r.includes('禁止使用 Monitor 修改 PaceFlow artifact 写入控制运行态'));
+  assert.ok(r.includes('锁、编号计数与 reservation 只能由 hook 创建/释放'));
+  assert.ok(r.includes('被拦截的命令：rm .pace/locks/x'));
+});
+
+test('MON-2. monitorArtifactDenyReason 含 artifact 拒绝核心句 + 命令回显', () => {
+  const r = monitorGuard.monitorArtifactDenyReason('echo x > task.md');
+  assert.ok(r.includes('禁止使用 Monitor 修改 artifact 文件'));
+  assert.ok(r.includes('artifact 修改必须走 artifact-writer 的 Write/Edit 路径'));
+  assert.ok(r.includes('被拦截的命令：echo x > task.md'));
+});
+
+test('MON-3. 命令回显截断 500 字符（防超长命令撑爆文案）', () => {
+  const long = 'a'.repeat(800);
+  assert.ok(monitorGuard.monitorArtifactRuntimeControlDenyReason(long).includes('a'.repeat(500)));
+  assert.ok(!monitorGuard.monitorArtifactDenyReason(long).includes('a'.repeat(501)));
 });
 
 // ============================================================

@@ -90,6 +90,19 @@ function main() {
   const includeActive = argv.includes('--include-active');
   const dirIdx = argv.indexOf('--artifact-dir');
   const artDir = dirIdx >= 0 ? path.resolve(argv[dirIdx + 1] || '') : '';
+  // FSW-1: 拒绝未知参数（fail-closed），防 `--dryrun` 等拼写错误被静默吞 → 误按非 dry-run 真写 artifact。
+  // 与 CHG-20260620-01 给其他 CLI helper 补的 unknown-flag fail-closed 对称。
+  const KNOWN_FLAGS = new Set(['--dry-run', '--include-active', '--artifact-dir']);
+  const unknown = [];
+  for (let i = 0; i < argv.length; i++) {
+    if (i === dirIdx) { i += 1; continue; } // 跳过 --artifact-dir 及其取值
+    if (!KNOWN_FLAGS.has(argv[i])) unknown.push(argv[i]);
+  }
+  if (unknown.length > 0) {
+    console.error(`未知参数: ${unknown.join(', ')}`);
+    console.error('用法: node migrate/fix-slug-wikilinks.js --artifact-dir <含 changes/ 的 artifact 根目录> [--dry-run] [--include-active]');
+    process.exit(2);
+  }
   if (!artDir || !fs.existsSync(path.join(artDir, 'changes'))) {
     console.error('用法: node migrate/fix-slug-wikilinks.js --artifact-dir <含 changes/ 的 artifact 根目录> [--dry-run] [--include-active]');
     process.exit(2);
