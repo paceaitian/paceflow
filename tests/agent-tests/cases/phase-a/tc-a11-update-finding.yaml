@@ -6,7 +6,6 @@ description: 验证 update-finding 把已存在 finding 的 status open→accept
 setup:
   fixture: empty-v6
   variables:
-    project_path: /tmp/test-vault/empty-v6
     date: "{TODAY}"
   pre_files:
     - path: "changes/findings/finding-{ISO_DATE}-tc-a11-target.md"

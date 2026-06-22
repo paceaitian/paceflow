@@ -107,7 +107,7 @@ function cmdVerify(yamlPath, reportPath) {
   const yamlAbs = path.isAbsolute(yamlPath) ? yamlPath : path.join(ROOT, yamlPath);
   const tc = runner.loadYaml(yamlAbs);
   const targetDir = (tc.setup.variables && tc.setup.variables.project_path)
-    || `/tmp/test-vault/${tc.setup.fixture}`;
+    || runner.defaultVaultDir(tc.setup.fixture);
   const setupHelper = require('./helpers/fixture-setup');
   const variables = setupHelper.buildVariables();
   // 与 prepare 保持一致：渲染并合入 case.setup.variables
@@ -139,7 +139,7 @@ function cmdTeardown(yamlPath) {
   const yamlAbs = path.isAbsolute(yamlPath) ? yamlPath : path.join(ROOT, yamlPath);
   const tc = runner.loadYaml(yamlAbs);
   const targetDir = (tc.setup.variables && tc.setup.variables.project_path)
-    || `/tmp/test-vault/${tc.setup.fixture}`;
+    || runner.defaultVaultDir(tc.setup.fixture);
   const teardownHelper = require('./helpers/fixture-teardown');
   teardownHelper.teardown(targetDir);
   console.log(`Cleaned: ${targetDir}`);
@@ -155,7 +155,7 @@ function cmdVerifyMulti(yamlPath, ...reportPaths) {
   const yamlAbs = path.isAbsolute(yamlPath) ? yamlPath : path.join(ROOT, yamlPath);
   const tc = runner.loadYaml(yamlAbs);
   const targetDir = (tc.setup.variables && tc.setup.variables.project_path)
-    || `/tmp/test-vault/${tc.setup.fixture}`;
+    || runner.defaultVaultDir(tc.setup.fixture);
   const setupHelper = require('./helpers/fixture-setup');
   const variables = setupHelper.buildVariables();
   for (const [k, v] of Object.entries(tc.setup.variables || {})) {

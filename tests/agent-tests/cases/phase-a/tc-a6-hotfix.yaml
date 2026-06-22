@@ -6,7 +6,6 @@ description: create-chg type=hotfix 验证文件名为 hotfix-{date}-NN.md（非
 setup:
   fixture: empty-v6
   variables:
-    project_path: /tmp/test-vault/empty-v6
     date: "{TODAY}"
 
 input:

@@ -6,7 +6,6 @@ description: close-chg 在主 session 已确认验证通过后，一次完成未
 setup:
   fixture: empty-v6
   variables:
-    project_path: /tmp/test-vault/empty-v6
     date: "{TODAY}"
   pre_files:
     - path: "changes/chg-{date}-01.md"

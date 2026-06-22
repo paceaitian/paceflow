@@ -15,11 +15,22 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const setupHelper = require('./fixture-setup');
 const teardownHelper = require('./fixture-teardown');
 const verifyHelper = require('./verify-output');
 
 const ROOT = path.join(__dirname, '..');
+
+// 临时 vault 根目录的单一来源。历史上硬编码 `/tmp/test-vault/<fixture>`，
+// 但 Windows 不识别 `/tmp`（会落到当前盘根 C:\tmp，污染且跨盘易失败），
+// 故统一走 os.tmpdir()，供 prepare/run-tests/teardown 与 shell 端 harness 复用，保证跨平台一致。
+function defaultVaultRoot() {
+  return path.join(os.tmpdir(), 'pace-test-vault');
+}
+function defaultVaultDir(fixture) {
+  return path.join(defaultVaultRoot(), String(fixture));
+}
 const REPO_ROOT = path.join(ROOT, '..', '..');
 const PLUGIN_ROOT = path.join(REPO_ROOT, 'plugin');
 const RESULTS_ROOT = path.join(ROOT, 'results');
@@ -340,7 +351,7 @@ function prepare(yamlRelOrAbsPath, options = {}) {
   const testCase = loadYaml(yamlPath);
 
   const targetDir = (testCase.setup.variables && testCase.setup.variables.project_path)
-    || `/tmp/test-vault/${testCase.setup.fixture}`;
+    || defaultVaultDir(testCase.setup.fixture);
 
   // 渲染 pre_files 中的变量需先 setup（变量来自 setup.buildVariables）
   const preFiles = testCase.setup.pre_files || [];
@@ -422,6 +433,8 @@ function appendManifest(date, entry) {
 module.exports = {
   loadYaml,
   parseSimpleYaml,
+  defaultVaultRoot,
+  defaultVaultDir,
   prepare,
   verifyAndReport,
   teardown,

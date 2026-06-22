@@ -6,7 +6,6 @@ description: R 阶段 action=review 前置门禁——目标 CHG 未 verified（
 setup:
   fixture: empty-v6
   variables:
-    project_path: /tmp/test-vault/empty-v6
     date: "{TODAY}"
   pre_files:
     - path: "changes/chg-{date}-01.md"

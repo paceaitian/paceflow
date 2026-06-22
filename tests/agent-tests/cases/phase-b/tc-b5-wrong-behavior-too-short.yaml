@@ -6,7 +6,6 @@ description: record-correction wrong-behavior 长度 10 字符不足 spec 要求
 setup:
   fixture: empty-v6
   variables:
-    project_path: /tmp/test-vault/empty-v6
     date: "{TODAY}"
 
 input:

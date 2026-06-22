@@ -6,7 +6,6 @@ description: 验证 update-chg action=review happy path：已 verified 的 CHG �
 setup:
   fixture: empty-v6
   variables:
-    project_path: /tmp/test-vault/empty-v6
     date: "{TODAY}"
   pre_files:
     - path: "changes/chg-{date}-01.md"

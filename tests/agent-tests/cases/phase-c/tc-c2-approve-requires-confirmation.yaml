@@ -6,7 +6,6 @@ description: C 阶段 approve-and-start 必须由主 session 明确传入 approv
 setup:
   fixture: empty-v6
   variables:
-    project_path: /tmp/test-vault/empty-v6
     date: "{TODAY}"
   pre_files:
     - path: "changes/chg-{date}-01.md"

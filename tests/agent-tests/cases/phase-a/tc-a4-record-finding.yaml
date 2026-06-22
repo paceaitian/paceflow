@@ -6,7 +6,6 @@ description: 验证 record-finding 创建详情文件 + findings.md 摘要索引
 setup:
   fixture: empty-v6
   variables:
-    project_path: /tmp/test-vault/empty-v6
     date: "{TODAY}"
 
 input:

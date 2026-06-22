@@ -1,0 +1,27 @@
+# .github/workflows/ci.yml — PACEflow 跨平台测试矩阵
+# 仓库根即 paceflow 本身（git 根）：run-all.js 在 tests/run-all.js，插件在 ./plugin，
+# 因此无需 working-directory 切换。三平台跑同一条 `node tests/run-all.js`。
+name: ci
+on:
+  push:
+    branches: [master]
+  pull_request:
+jobs:
+  test:
+    name: tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false   # 一个平台挂不掩盖其他平台
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # git-diff-check 区间需历史；.gitattributes 保 LF
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'   # 20 LTS；代码用 fs.cpSync(16.7+)/fs.rmSync(14.14+) 均安全
+      - name: Install claude CLI (plugin-validate 需要，纯本地 manifest 校验无需 API key)
+        run: npm install -g @anthropic-ai/claude-code
+      - name: Run full suite
+        run: node tests/run-all.js

@@ -29,7 +29,7 @@ cd /mnt/k/AI/paceflow-hooks/paceflow
 mkdir -p /tmp/paceflow-agent-baseline
 ```
 
-不要并行执行使用同一 fixture 的 `prepare`。多个 case 共用 `/tmp/test-vault/empty-v6`，
+不要并行执行使用同一 fixture 的 `prepare`。多个 case 共用 `os.tmpdir()/pace-test-vault/empty-v6`（POSIX 下即 `/tmp/pace-test-vault/empty-v6`），
 必须按 prepare → verify → teardown 串行跑。
 
 ## Phase A

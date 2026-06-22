@@ -6,7 +6,6 @@ description: archive-chg 时 task.md 无 <!-- ARCHIVE --> 标记，期望 agent 
 setup:
   fixture: empty-v6-no-archive
   variables:
-    project_path: /tmp/test-vault/empty-v6-no-archive
     date: "{TODAY}"
   pre_files:
     - path: "changes/chg-{date}-01.md"

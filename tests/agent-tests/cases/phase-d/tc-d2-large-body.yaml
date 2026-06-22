@@ -6,7 +6,6 @@ description: record-finding body 含 5K+ 字符大段内容，验证 agent 完�
 setup:
   fixture: empty-v6
   variables:
-    project_path: /tmp/test-vault/empty-v6
     date: "{TODAY}"
 
 input:

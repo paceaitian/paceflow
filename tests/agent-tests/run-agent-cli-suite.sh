@@ -33,6 +33,8 @@ AGENT_NAME="${AGENT_NAME:-paceflow:artifact-writer}"
 SESSION_CWD="${SESSION_CWD:-$OUTDIR/session-cwd}"
 PRESERVE_FAILED_FIXTURE="${PRESERVE_FAILED_FIXTURE:-1}"
 SUMMARY="$OUTDIR/summary.txt"
+# vault 根（单一来源，与 JS 端 defaultVaultRoot 一致），用于 --add-dir 授权真实 vault 父目录
+VAULT_ROOT="$(cd "$PACEFLOW_ROOT" && node -e 'process.stdout.write(require("./tests/agent-tests/helpers/subagent-runner").defaultVaultRoot())')"
 
 if [[ "$MODE" != "production" && "$MODE" != "harness" ]]; then
   echo "MODE must be production or harness; got: $MODE" >&2
@@ -51,13 +53,14 @@ if [[ -n "${EFFORT:-}" ]]; then
 fi
 
 case_target_dir() {
-  python3 - "$1" <<'PY'
-import sys, yaml
-tc = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
-setup = tc.get("setup", {})
-variables = setup.get("variables") or {}
-print(variables.get("project_path") or f"/tmp/test-vault/{setup.get('fixture')}")
-PY
+  # 单一来源：复用 subagent-runner 的 defaultVaultDir（含 project_path override 优先级），
+  # 避免 shell 端硬编码 /tmp/test-vault 与 JS 端 os.tmpdir()/pace-test-vault 目录分叉。
+  (cd "$PACEFLOW_ROOT" && node -e '
+const r = require("./tests/agent-tests/helpers/subagent-runner");
+const tc = r.loadYaml(process.argv[1]);
+const v = (tc.setup && tc.setup.variables) || {};
+process.stdout.write(v.project_path || r.defaultVaultDir(tc.setup.fixture));
+' "$1")
 }
 
 copy_failed_fixture() {
@@ -104,7 +107,7 @@ run_case() {
       --agent "$AGENT_NAME" \
       --plugin-dir "$PLUGIN_DIR" \
       --add-dir "$PACEFLOW_ROOT" \
-      --add-dir /tmp/test-vault \
+      --add-dir "$VAULT_ROOT" \
       --no-session-persistence \
       --dangerously-skip-permissions \
       --output-format json \

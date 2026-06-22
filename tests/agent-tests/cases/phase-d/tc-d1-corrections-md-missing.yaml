@@ -6,7 +6,6 @@ description: corrections.md 不存在时 record-correction 必须按 spec §5.6.
 setup:
   fixture: empty-v6-no-corrections
   variables:
-    project_path: /tmp/test-vault/empty-v6-no-corrections
     date: "{TODAY}"
 
 input:

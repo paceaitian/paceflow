@@ -6,7 +6,6 @@ description: 验证 create-chg 在空 v6 项目下创建一个 CHG，正确生�
 setup:
   fixture: empty-v6
   variables:
-    project_path: /tmp/test-vault/empty-v6
     date: "{TODAY}"
 
 input:

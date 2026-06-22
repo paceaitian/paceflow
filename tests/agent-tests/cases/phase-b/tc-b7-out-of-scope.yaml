@@ -6,7 +6,6 @@ description: 主 session 派遣未在 6 类指令枚举内的 operation（delete
 setup:
   fixture: empty-v6
   variables:
-    project_path: /tmp/test-vault/empty-v6
     date: "{TODAY}"
 
 input:

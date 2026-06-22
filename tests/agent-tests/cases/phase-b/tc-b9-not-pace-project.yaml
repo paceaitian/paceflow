@@ -6,7 +6,6 @@ description: ARTIFACT_DIR 不含 changes/ 子目录，agent 应早期检测并�
 setup:
   fixture: empty-v6-no-changes
   variables:
-    project_path: /tmp/test-vault/empty-v6-no-changes
     date: "{TODAY}"
 
 input:

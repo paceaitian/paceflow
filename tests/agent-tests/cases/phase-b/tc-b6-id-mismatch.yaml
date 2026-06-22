@@ -6,7 +6,6 @@ description: update-chg target 文件存在但 frontmatter chg-id 与文件名�
 setup:
   fixture: empty-v6
   variables:
-    project_path: /tmp/test-vault/empty-v6
     date: "{TODAY}"
   pre_files:
     - path: changes/chg-{TODAY}-99.md

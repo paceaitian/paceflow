@@ -26,8 +26,8 @@ tests/agent-tests/
 ├── fixtures/                # vault 状态快照（cp -r 到临时目录后跑测试）
 │   └── empty-v6/            # 空 v6 项目（5 索引模板 + 空 changes/）
 ├── helpers/                 # 框架基础设施
-│   ├── fixture-setup.js     # cp -r fixture → /tmp/test-vault/
-│   ├── fixture-teardown.js  # rm -rf /tmp/test-vault/
+│   ├── fixture-setup.js     # cp -r fixture → os.tmpdir()/pace-test-vault/
+│   ├── fixture-teardown.js  # rm -rf os.tmpdir()/pace-test-vault/（仅限 os.tmpdir() 下）
 │   ├── subagent-runner.js   # 协调 artifact-writer 派遣 + 报告捕获
 │   └── verify-output.js     # YAML expected vs 真实产出对比
 └── results/                 # 历史结果（按日期分组，git-ignored）
@@ -77,7 +77,7 @@ description: 验证 create-chg happy path
 setup:
   fixture: empty-v6              # fixtures/<name>/
   variables:
-    project_path: /tmp/test-vault/empty-v6
+    date: "{TODAY}"              # vault 路径默认走 os.tmpdir()/pace-test-vault/<fixture>，无需 project_path
 
 input:
   operation: create-chg

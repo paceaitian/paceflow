@@ -6,7 +6,6 @@ description: record-correction 正向 contract，验证 correction 详情与 cor
 setup:
   fixture: empty-v6
   variables:
-    project_path: /tmp/test-vault/empty-v6
     date: "{TODAY}"
 
 input:

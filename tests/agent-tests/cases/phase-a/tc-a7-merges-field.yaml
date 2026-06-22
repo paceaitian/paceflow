@@ -6,7 +6,6 @@ description: "record-finding 含 merges 字段（指向预置存在的 finding�
 setup:
   fixture: empty-v6
   variables:
-    project_path: /tmp/test-vault/empty-v6
     date: "{TODAY}"
   pre_files:
     - path: changes/findings/finding-{ISO_DATE}-base.md

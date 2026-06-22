@@ -6,7 +6,6 @@ description: close-chg 主路径一把梭折叠 REVIEWED——主 session 已确
 setup:
   fixture: empty-v6
   variables:
-    project_path: /tmp/test-vault/empty-v6
     date: "{TODAY}"
   pre_files:
     - path: "changes/chg-{date}-01.md"

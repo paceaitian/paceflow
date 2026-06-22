@@ -6,7 +6,6 @@ description: update-chg action=bulk-rename 非合法 action 枚举值（合法�
 setup:
   fixture: empty-v6
   variables:
-    project_path: /tmp/test-vault/empty-v6
     date: "{TODAY}"
   pre_files:
     - path: changes/chg-{TODAY}-01.md

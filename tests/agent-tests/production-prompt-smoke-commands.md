@@ -66,7 +66,7 @@ MODEL=sonnet EFFORT=max MODE=production tests/agent-tests/run-agent-cli-suite.sh
 AGENT_NAME=paceflow:artifact-writer MODE=production tests/agent-tests/run-agent-cli-suite.sh production-gate
 ```
 
-不要并行执行使用同一 fixture 的 `prepare`。多个 case 共用 `/tmp/test-vault/empty-v6`，
+不要并行执行使用同一 fixture 的 `prepare`。多个 case 共用 `os.tmpdir()/pace-test-vault/empty-v6`（POSIX 下即 `/tmp/pace-test-vault/empty-v6`），
 必须按 prepare → verify → teardown 串行跑。
 
 ## Core Structural Cases

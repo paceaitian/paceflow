@@ -6,7 +6,6 @@ description: update-chg target 指向不存在的 CHG-ID，期望 target-not-fou
 setup:
   fixture: empty-v6
   variables:
-    project_path: /tmp/test-vault/empty-v6
     date: "{TODAY}"
 
 input:

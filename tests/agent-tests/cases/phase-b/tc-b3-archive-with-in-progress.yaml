@@ -6,7 +6,6 @@ description: archive-chg 任务列表含 [/] 进行中任务，期望前置检�
 setup:
   fixture: empty-v6
   variables:
-    project_path: /tmp/test-vault/empty-v6
     date: "{TODAY}"
   pre_files:
     - path: "changes/chg-{date}-01.md"
