@@ -43,7 +43,9 @@ const SUITES = [
   { name: 'migrate-v7', cmd: process.execPath, args: ['tests/test-migrate-v7.js'] },
   { name: 'agent-helpers', cmd: process.execPath, args: ['tests/test-agent-tests-helpers.js'] },
   { name: 'run-all-self', cmd: process.execPath, args: ['tests/test-run-all.js'] },
-  { name: 'plugin-validate', cmd: 'claude', args: ['plugin', 'validate', './plugin'] },
+  // Windows：claude 经 npm 全局装为 claude.cmd shim，execFileSync 不走 PATHEXT 解析（且新版 Node 出于安全
+  // 禁止无 shell 直跑 .cmd）→ ENOENT 瞬挂。shell:true 让 cmd.exe 经 PATHEXT 解析 claude.cmd。POSIX 保持 shell:false。
+  { name: 'plugin-validate', cmd: 'claude', args: ['plugin', 'validate', './plugin'], shell: process.platform === 'win32' },
   { name: 'git-diff-check', run: gitWhitespaceCheck },
 ];
 
@@ -75,7 +77,7 @@ function runSuites(suites, opts = {}) {
       if (typeof s.run === 'function') {
         ok = s.run(cwd, quiet) !== false; // run 函数：返回 false 或抛错即失败（如 git-diff-check 区间检查）
       } else {
-        execFileSync(s.cmd, s.args, { cwd, stdio: quiet ? 'pipe' : 'inherit' });
+        execFileSync(s.cmd, s.args, { cwd, stdio: quiet ? 'pipe' : 'inherit', shell: s.shell });
       }
     } catch (e) {
       ok = false; // 子进程非零退出 / run 抛错 / 命令不存在 → 标记失败，继续跑完其余套件
