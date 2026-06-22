@@ -5,6 +5,15 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
+
+// 测试自洽（hermetic）：必须在 require pace-utils 之前强制 PACE_VAULT_PATH 指向进程私有临时 vault 根。
+// constants.js 在 require 时即把 VAULT_PATH 固化为 `process.env.PACE_VAULT_PATH || ''`，因此干净环境
+// （CI 无 PACE_VAULT_PATH）下 VAULT_PATH 为空字符串，vault/PACE_PROJECT_NAME/scanRelatedNotes/WIKI 等测试
+// 构造 `path.join('', 'projects', name)` = 相对路径 `projects/<name>` 而断言崩溃（本地靠维护者 shell 的
+// ambient 值假绿）。在此固定为临时根，既让 CI 干净环境成立，也避免污染真实 Obsidian vault。
+process.env.PACE_VAULT_PATH = path.join(os.tmpdir(), 'pace-test-vault-root');
+fs.mkdirSync(process.env.PACE_VAULT_PATH, { recursive: true });
 
 const paceUtils = require('../plugin/hooks/pace-utils');
 const cmdRecognition = require('../plugin/hooks/pre-tool-use/command-recognition');
