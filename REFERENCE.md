@@ -1,6 +1,6 @@
-# PACEflow v7.2.28 参考手册
+# PACEflow v7.2.29 参考手册
 
-> 最后更新：2026-06-20
+> 最后更新：2026-06-23
 > 协议：PACE (Plan-Artifact-Check-Execute-Verify-Review)
 > 兼容性：不兼容 v5 活跃流程；v5 内容只作为 ARCHIVE 历史。
 
@@ -20,7 +20,7 @@
 | 用户 Skill 规则 | `plugin/skills/*/SKILL.md` |
 | 内部审计资料 | `internal/skills/audit/` |
 | v6 迁移 guidebook | `docs/paceflow-v6-guidebook.md` |
-| v6→v7 升级指引（顺序铁律 / 锁死恢复 / migrate-v7 用法） | `README.md` §「v6 用户升级到 v7」 |
+| v6→v7 升级指引（顺序铁律 / 锁死恢复 / migrate-v7 用法） | `README.md` §「升级与迁移」 |
 
 `install.js` / `verify.js` 只允许作为本地 smoke/健康检查工具，不是正式安装路径；对应本地测试文件 `tests/test-install.js` 也不属于 tracked release gate。
 

@@ -288,7 +288,7 @@ module.exports = function createChangeAnalysis(ctx) {
 
   // 前向兼容 guard（CHG-20260612-04）：数据 schema 比 hook 认识的新时，hook 对该数据的
   // 一切流程判断（索引解析/状态机/必填集）都不可信——流程门必须让位为软提示，否则就是
-  // v6→v7 升级窗口 brick 的重演（旧 hook 对新数据 deny 级锁死，实测见 README §v6 用户升级到 v7）。
+  // v6→v7 升级窗口 brick 的重演（旧 hook 对新数据 deny 级锁死，实测见 README §升级与迁移）。
   const SCHEMA_KNOWN_MAX = 7.0;
 
   /**

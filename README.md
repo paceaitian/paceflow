@@ -2,44 +2,27 @@
 
 [![ci](https://github.com/paceaitian/paceflow/actions/workflows/ci.yml/badge.svg)](https://github.com/paceaitian/paceflow/actions/workflows/ci.yml)
 
-> **PACEflow 是一套 Claude Code hook，强制 AI 编码按「先规划、获批，再写代码、验证、收尾」的顺序走——靠在工具调用层拦截，而不是靠提示词提醒。**
+> **PACEflow 是一套 Claude Code hook，用工具层的确定性门，让 AI 在长任务里不忘走流程——先规划获批再动手、改完验证再收尾；过程记账卸给一次性子代理，并跨 session 恢复。**
 
-## 核心理念
+## 它做什么
 
-### 它不做什么
+PACEflow 在工具调用边界加两个确定性 hook 门，外加一套跨 session 的记录：
 
-- 不会让 AI 更聪明，它不改模型能力。
-- 不抓 bug、不管代码质量。代码好坏取决于 AI 能力和你的测试、review，流程管不了。
-- 不替你写 spec、不替你做设计，它不产出任何内容。
-- 不判断你「验证得对不对、审计得够不够」，它只确认这些步骤发生过、留了记录，内容对错交给人。
-- 不锁死你的工作流：随时可暂停或停用（`/paceflow:pause` `/paceflow:resume` `/paceflow:disable`）。
+- **没有获批的活跃变更（CHG），写代码被拒**（PreToolUse）。逼出「先建变更记录、获批，再动手」。
+- **没验证 / 没审计就想结束会话，被 Stop 拦下**。逼出「改完先验证、审计，再收尾归档」。
+- **过程记账由 `artifact-writer` 子代理写**，不占用主 session 上下文。
+- **跨 session 恢复**：CHG / finding / correction / walkthrough 索引在 SessionStart 自动重注入，新 session（或 compact 后）接上「上次做到哪、为什么这么改」。
 
-### 它做什么
+门只确认**步骤发生过、顺序对、留了记录**：`VERIFIED` 表示验证这一步被记录了，`REVIEWED` 表示审计这一步被记录了。内容对错由测试、CI、review 和模型能力决定，门不裁决。
 
-AI 写代码时的典型问题不在质量，在过程：一上来就动手、中途迷失方向、改完不验证就收工。CLAUDE.md 里写「请先规划」AI 可以无视（自然语言指令常被忽略，遵守率不稳定）。PACEflow 把这些约束放进 hook，确定性执行：
+## 它不做什么
 
-- 没有获批的活跃变更（CHG），写代码的工具调用会被拒绝。
-- 没验证就想结束会话，会被 Stop hook 拦下。
-- 跳过顺序（没批准就验证、没验证就审计），会被拒绝。
+- 不让模型更聪明，不改模型能力。
+- 不抓 bug、不判断代码质量。
+- 不替你写 spec 或做设计；`spec.md` 是你的项目事实文件，不是「真相源」。
+- 不防刻意绕过——你随时能 `/paceflow:pause`、`/paceflow:disable` 主动退出。
 
-它只保证一件事：该走的步骤走到了、顺序对、留下了记录。
-
-### 它和 TDD / SDD / OpenSpec / Spec Kit 不是竞品
-
-它们决定写什么——什么测试、什么 spec、什么设计；PACEflow 只保证这些被执行。两者在不同的层：
-
-| 层 | 工具 | 负责 |
-|----|------|------|
-| 内容 | TDD / SDD / OpenSpec / Spec Kit | 写什么测试、spec、设计 |
-| 执行 | **PACEflow** | 确保它们真的被做（hook 拦截） |
-
-OpenSpec、Spec Kit 也有「spec → plan → tasks」的流程，但它们靠约定推动；PACEflow 靠 hook 兜底。它们告诉你做什么，PACEflow 保证你做了。两者一起用（用 `pace-bridge` 把外部 plan 接进 CHG），不必二选一。
-
-### 它适合谁
-
-价值取决于项目。长期、较大、多人、生产或高风险的项目，过程失控代价高，PACEflow 回报明显；一次性原型、抛弃脚本、随手试验，它只是负担——别用，或只开最轻的档。
-
-### PACE 六阶段
+## PACE 六阶段
 
 | 阶段 | 含义 | Hook 保障 |
 |------|------|-----------|
@@ -50,13 +33,18 @@ OpenSpec、Spec Kit 也有「spec → plan → tasks」的流程，但它们靠�
 | **V**erify | 验证 | Stop 完成度检查 + `verified-date` / `<!-- VERIFIED -->` |
 | **R**eview | 审计 | 收口前对本 CHG diff 做对抗审计并记录；Stop 检查 + `reviewed-date` / `<!-- REVIEWED -->` |
 
-### CHG 是最小变更单元
+## CHG 是最小变更单元
 
-CHG/HOTFIX 不是大计划容器，而是连续执行、可验证、可关闭的最小变更单元。大计划应拆成多个可以独立完成和验证的 CHG，例如数据结构/迁移、后端接口、前端调用、文档/配置分别记录。
+CHG/HOTFIX 是连续执行、可验证、可关闭的最小变更单元，不是大计划容器。大计划拆成多个可独立完成和验证的 CHG（如数据结构/迁移、后端接口、前端调用、文档/配置分别记录）。
 
-每个 CHG 内可以有多个 `T-NNN`，但这些任务应服务于同一个闭环，并默认在一次执行流中完成。连续执行时不需要为每个中间任务都派 `update-status`；验证通过后优先用 `close-chg complete-open-tasks:true` 一次收口、写 VERIFIED、归档并写 walkthrough。
+合适的 CHG 粒度：
 
-### 4 个索引文件 + spec.md + changes/详情 = 项目记忆
+- ✅ 「给 golden 快照测试加 Windows 路径归一化」
+- ✅ 「让 artifact-writer 按 CHG 复用」
+- ❌ 太宽：「改进 PACEflow」
+- ❌ 太小：「重命名一个局部变量」
+
+## 项目记忆
 
 | 文件 | 用途 |
 |------|------|
@@ -66,60 +54,6 @@ CHG/HOTFIX 不是大计划容器，而是连续执行、可验证、可关闭的
 | `corrections.md` | correction 摘要索引 |
 | `walkthrough.md` | 工作总结索引 |
 | `changes/` | CHG/HOTFIX/finding/correction 详情文件 |
-
-索引文件使用 `<!-- ARCHIVE -->` 分隔：活跃区保持精简，归档区保留历史。详情文件由 `artifact-writer` agent 统一维护。
-
----
-
-## v6 相比 v5 改进了什么
-
-v6 是 breaking change，不继续兼容 v5 的活跃运行格式。已有 v5 内容应迁移或保留在 `<!-- ARCHIVE -->` 下方作为历史，不再参与新的 P-A-C-E-V-R 流程。
-
-| 维度 | v5 | v6 |
-|------|----|----|
-| Artifact 写入 | 主 session 直接编辑 `task.md` / `implementation_plan.md` / `findings.md` 等主文件 | `artifact-writer` agent 统一创建、更新、验证、归档 artifact；主 session 只负责业务判断和代码实现 |
-| 文件结构 | CHG、任务详情、finding/correction 详情大量内嵌在主文件活跃区 | 主文件只保留轻量 wikilink 索引；完整详情写入 `changes/**` |
-| 状态权威 | 主文件 checkbox 与正文段落混合承载状态 | `changes/<id>.md` frontmatter 是权威；索引 checkbox 只做展示和快速检查 |
-| 审批/验证 | C/V 标记容易被主 session 手写或写错位置 | `APPROVED` / `VERIFIED` / `verified-date` 只能由 `artifact-writer` 写入，hook 会拦截主 session 直写 |
-| 上下文成本 | SessionStart 注入较多历史内容，compact 后恢复依赖主文件长文本 | 只注入活跃索引和活跃 CHG 摘要，compact 后由 SessionStart 重新注入当前状态 |
-| 多项目/Obsidian | vault 路由和 worktree 共用 artifact 的边界较弱 | 首次启用可选择 Obsidian vault 或本地项目目录；worktree 自动归一到宿主项目 artifact |
-| Claude 任务列表 | 主要按顶层 `task.md` checkbox 判断 | 不作为 PACE hook 约束对象；主模型可自行使用任务面板，PACE 权威仍是 `changes/<id>.md ## 任务清单` |
-| 失败恢复 | 工具失败后主要依赖模型自觉重试 | PostToolUseFailure 明确提醒失败不能视为完成，SubagentStop 观察 artifact-writer 报告协议 |
-
-核心收益是把“结构正确性”从提示词建议下沉到 hook 和 agent contract：hook 只做机械兜底，不判断业务内容真伪；内容质量仍由主 session、subagent 和用户确认共同负责。
-
-### v6 用户升级到 v7
-
-v7 改变了 artifact 数据布局（task.md 单索引、frontmatter 9 key 封闭合同、implementation_plan.md 退役为 tombstone），升级分**插件升级**与**数据迁移**两步，顺序不能反：
-
-```text
-1. 升级插件到 7.x（marketplace update / 重装）
-2. 关闭或 reload 全部 session——包括其他 worktree、后台 session，一个都不能漏
-3. 开新 session，确认 SessionStart 注入的 helper 路径含 /7.x.x/（说明新 hook 已生效）
-4. 预览迁移：node "${CLAUDE_PLUGIN_ROOT}/migrate/migrate-v7.js" --cwd <项目目录> --dry-run
-5. 阅读 dry-run 报告确认后，去掉 --dry-run 真正执行（执行前自动备份到
-   <项目>/.pace/backups/v7-migration/<时间戳>/，验收失败自动还原）
-```
-
-> `${CLAUDE_PLUGIN_ROOT}` 是 Claude Code 注入 hook 的插件根路径，在普通终端里未定义。手动运行上面（以及下文）的命令前，先在终端解析它：
-> ```bash
-> export CLAUDE_PLUGIN_ROOT="$(ls -d ~/.claude/plugins/cache/paceaitian-paceflow/paceflow/*/ | sort -V | tail -n1)"
-> ```
-
-> [!WARNING]
-> **为什么必须先升级、reload 所有 session，再迁移数据**：兼容性是不对称的——新 hook 对未迁移的旧数据只做软提示、不拦截；但**旧 hook（6.x）对已迁移的 v7 数据会拒绝一切项目文件写入并阻断会话结束**（实测）。只要还有任何一个 session 在跑旧 hook，先迁数据就会把它「锁死」。同理，迁移完成后**不要降级回 6.x**——那等于主动制造同一种锁死。
-
-**万一已经被锁死（旧 hook + 已迁移数据）怎么办**：
-
-1. 首选：关闭该 session 重开（或 reload 插件），新 hook 生效后锁死即消失；
-2. 暂时无法 reload 时：`node "${CLAUDE_PLUGIN_ROOT}/migrate/migrate-v7.js" --cwd <项目> --restore <备份目录>` 把数据还原回迁移前，等全部 session 升级后再迁；
-3. **不要照旧 hook 拒绝信息里的指引去「修复索引」**——那会把索引行写回已退役的 implementation_plan.md，等于撤销迁移。
-
-migrate-v7 的其他能力：`--dry-run` 预览（不写盘）、`--restore <备份目录>` 整体还原、迁移产物 100% 通过 schema 验收否则自动回滚。
-
-### v5 用户
-
-PACEflow 不再提供 v5 自动迁移。检测到 v5 时代布局（artifact 根目录有 `task.md` 活跃详情但没有 `changes/`）时只会提示一句：新变更直接按当前合同写入（task.md 仅追加索引行，详情在 `changes/<id>.md`，首个 create-chg 会建出 `changes/`），v5 存量内容保持原样；如需保留历史，可手动归档到 `<!-- ARCHIVE -->` 下方。
 
 ---
 
@@ -182,93 +116,67 @@ node "${CLAUDE_PLUGIN_ROOT}/hooks/set-project-root.js" --mode independent
 
 ---
 
-## 特色功能
+## 集成
 
-### Superpowers 全流程集成
+### Superpowers
 
-无缝对接 [Superpowers](https://github.com/andyjakubowski/superpowers)，从需求探索到代码交付的全链路自动化：
+接 [Superpowers](https://github.com/andyjakubowski/superpowers) 的规划链：brainstorming / writing-plans 产出的 plan 经 `pace-bridge` 转成 CHG，设计阶段已参与决策时自动 APPROVED。
 
 ```
-brainstorming（需求探索 + 方案设计）
-  → writing-plans（生成实施计划）
-      → pace-bridge（派 artifact writer 创建 CHG）
-      → auto-APPROVED（设计阶段已参与决策，跳过重复审批）
-        → 选择执行策略（串行 / 并行 agent / TDD）
+brainstorming → writing-plans → pace-bridge（plan 转 CHG）→ auto-APPROVED → 执行
 ```
 
-用户只需参与设计决策，后续 `changes/<id>.md`、任务编号、变更 ID 和索引全部由 agent 自动生成。不使用 Superpowers 时回退 PACE 原生规划。
+不用 Superpowers 时回退 PACE 原生规划。
 
-### Claude Code `/plan` 桥接
+### Claude Code `/plan`
 
-原生支持 Claude Code 的 `/plan` 模式——计划文件自动检测，pace-bridge skill 一键转换为 PACE CHG（`changes/<id>.md` + `task.md` 单索引）。Compact 后计划丢失？自动恢复提醒。
+`/plan` 计划文件自动检测，`pace-bridge` 转成 CHG（`changes/<id>.md` + `task.md` 索引）；compact 后计划丢失会提醒恢复。
 
-### 智能上下文管理
+### Obsidian
 
-索引文件活跃内容和活跃 CHG 摘要每次会话自动注入，按相关性智能截断：
+设置 `PACE_VAULT_PATH` 后，artifact 可存到 vault 的 `projects/<项目名>/`：
 
-- 已完成的变更/调研/工作记录自动省略
-- walkthrough 只保留最近记录，findings 只注入未解决项
-- **显著降低 token 消耗**，大幅减少 Compact 频率
-
-### Obsidian 知识中枢
-
-设置 `PACE_VAULT_PATH` 后解锁跨项目知识管理：
-
-- 首次启用可选择将 Artifact 存储到 `projects/<项目名>/` 或本地项目目录，选择写入 `.pace/artifact-root`
-- Git worktree 自动沿用宿主项目的 artifact 目录，避免临时 worktree 分叉出独立记录
-- `artifact-writer` 派遣前可用 `hooks/reserve-artifact-id.js` 预留 CHG/HOTFIX/CORRECTION 编号；pace-bridge 收尾可用 `hooks/sync-plan.js` 标记 plan 已同步；真实写入时按详情文件或索引资源短暂加锁，多 worktree 只在共享索引写入窗口串行
-- 想看 SessionStart 实际注入给模型什么（新 session / compact 后均可），运行 `hooks/print-session-context.js`（加 `--compact` 看 compact 后注入）；它设 `PACE_PRINT_ONLY` 只读预览、不重置 Stop 计数器也不写 `.pace`
-- `knowledge/` + `thoughts/` 沉淀可复用经验
-- 会话启动自动注入关联笔记摘要
+- 首次启用选择 artifact 存 vault 还是本地项目目录
+- `knowledge/` + `thoughts/` 笔记沉淀跨项目经验，SessionStart 自动注入关联摘要
 - 兼容 Obsidian Tasks / Dataview 跨项目查询
 
-### Agent Teams 兼容性
+### Agent Teams
 
-Teammate 身份自动检测（`CLAUDE_CODE_TEAM_NAME` 环境变量）。定位 **teammate = 纯执行者**：主 session 负责任务编排与更新，teammate 不参与任务管理（artifact 状态需单一权威源）。流程引导类 deny（artifact-root 选择、迁移、桥接——需主 session 与用户交互）对 teammate 降级为提示避免死锁；批准/完整性/runtime-control 类 deny（C/E 阶段门、无活跃 CHG、索引完整性、marker 伪造、删锁、直接写 artifact）对 teammate **仍硬阻断**。详见 REFERENCE「PreToolUse 拒绝档位与 teammate 降级」。
+自动检测 teammate 身份（`CLAUDE_CODE_TEAM_NAME`）。teammate = 纯执行者：任务管理（批准 / 建 CHG / 改状态 / 归档）归主 session 单一权威源；流程引导类 deny 对 teammate 降级为提示避免死锁，批准 / 完整性类 deny 仍硬阻断。完整降级规则见 [REFERENCE](REFERENCE.md)。
 
 ---
 
-## 核心功能模块
+## 升级与迁移
 
-### Project Root 与 Artifact Root
+> 新安装可跳过本节，仅 v6 / v5 老用户升级时需要。
 
-PACEflow 明确区分当前打开目录、项目管理边界和 artifact 存放位置。普通子目录默认继承最近的父级 Project Root，因此在 `packages/api`、`plugin/` 或嵌套 git repo 中启动 Claude Code 时，仍能沿用父项目的 `.pace` 运行态、CHG owner、Stop 检查和 artifact root。真正独立的新子项目先用 `set-project-root.js --mode independent` 断开继承，再选择自己的 artifact root。
+**v6 → v7**：v7 改了 artifact 数据布局（`task.md` 单索引、frontmatter 9-key 封闭合同、`implementation_plan.md` 退役）。升级分两步、顺序不能反——先升级插件并 reload 所有 session，再迁移数据：
 
-`local` artifact root 表示 Project Root 本地目录，不是当前子目录，也不是 `.pace/`。`vault` artifact root 表示 `$PACE_VAULT_PATH/projects/<项目名>/`；项目名可用 `PACE_PROJECT_NAME` 覆盖。
+```text
+1. 升级插件到 7.x（marketplace update / 重装）
+2. 关闭或 reload 全部 session——包括其他 worktree、后台 session，一个都不能漏
+3. 开新 session，确认 SessionStart 注入的 helper 路径含 /7.x.x/（新 hook 已生效）
+4. 预览迁移：node "${CLAUDE_PLUGIN_ROOT}/migrate/migrate-v7.js" --cwd <项目目录> --dry-run
+5. 确认报告后去掉 --dry-run 执行（自动备份到 .pace/backups/v7-migration/<时间戳>/，验收失败自动还原）
+```
 
-### Worktree 路由与 Owner
+> 终端手动运行需先解析插件根路径：`export CLAUDE_PLUGIN_ROOT="$(ls -d ~/.claude/plugins/cache/paceaitian-paceflow/paceflow/*/ | sort -V | tail -n1)"`
 
-Git worktree 和 `.claude/worktrees/*` 自动归一到宿主 Project Root，避免临时分支目录分裂出独立 `task.md` 或 `changes/**`。普通代码文件仍写当前 worktree；只有 PACEflow artifacts 和 `.pace` 运行态走共享 Project Root。
+> [!WARNING]
+> **顺序不能反**：新 hook 对旧数据只软提示，但**旧 hook（6.x）对已迁移的 v7 数据会拒绝一切写入并阻断会话结束**（实测）。还有 session 跑旧 hook 时先迁数据会把它锁死；迁移后也不要降级回 6.x。被锁死就 reload 该 session（新 hook 生效即解），或 `migrate-v7.js --restore <备份目录>` 还原后等全部 session 升级再迁——不要照旧 hook 提示去「修复索引」，那会撤销迁移。
 
-每个活跃 CHG 都有 `.pace/change-owners/<id>.json` owner 记录，包含 session、agent、cwd、worktree、branch 和 heartbeat。SessionStart 会折叠其他 worktree/session 的 fresh owner CHG，Stop 不因外部 owner 的正常进度阻断当前 session；结构损坏、索引不一致、详情缺失仍是全局问题，会继续阻断。相同 worktree/branch 新开 session 可接续当前 CHG，跨 checkout 接手 stale owner 必须带用户明确接手证据。
+**v5 → v7**：不提供自动迁移。检测到 v5 布局（有 `task.md` 活跃详情但无 `changes/`）只提示一句，新变更按当前合同写入、存量原样保留；需保留历史可手动归档到 `<!-- ARCHIVE -->` 下方。
 
-### Artifact 并发控制
+---
 
-CHG/HOTFIX/CORRECTION 编号由 `reserve-artifact-id.js` 原子预留；真实 artifact 写入按资源短暂加锁。详情文件、根索引和编号计数器分别使用 `.pace/locks/artifacts/`、`.pace/sequences/`、`.pace/reservations/` 保护，允许多 worktree 并行写代码，但共享索引写入窗口会串行。
+## 进阶与边界
 
-Bash、PowerShell、Monitor、Write/Edit/MultiEdit 都不能手写或破坏 `.pace` 控制面文件，例如 lock、sequence、reservation、index transaction。锁冲突时提示等待或重试，不要求模型删除锁。
+下面是多 session、并发和写保护的行为边界，完整规则见 [REFERENCE](REFERENCE.md)：
 
-### CHG 生命周期与 Deferred
-
-`changes/<id>.md` 是 CHG 状态权威；索引 checkbox 只做展示和快速检查。`[ ] planned` 是 backlog；`[ ] + APPROVED` 是 ready/deferred，允许 Stop 但执行前仍必须 start；`[/] in-progress` 是当前执行；`[!]` 是 blocked/deferred，表示暂停或外部阻塞；`[x] completed` 仍需 verify/close；`archived` 才是完整闭环。
-
-Stop hook 对当前 session 的 running、completed 未验证、verified 但未审计、reviewed 后未归档和结构不一致问题统一 block（exit 2）；这些完成度检查共用 `stop-block-count` 计数器、连阻 3 次后降级放行不死锁，其中 verified 但未审计要求先跑 R 审计；对 ready/deferred/blocked CHG 使用可见提醒允许结束。Claude Code v2.1.145+ 在 Stop 输入提供 `background_tasks` 时，PACEflow 会把“running CHG 仍有未完成 T-NNN，但后台 Workflow/subagent/team/shell 任务仍在运行”的场景视为主 session 暂停等待后台结果，放行 Stop 并显示可见提醒；结构损坏、未验证、待归档仍照常阻断。`update-status` 只用于暂停、阻塞、跳过、跨 session 可见性或长任务状态维护；连续完成的 CHG 优先用 `close-chg complete-open-tasks:true` 一次收口。
-
-### Artifact 写保护与 Agent Contract
-
-主 session 不直接编辑 `task.md`、`walkthrough.md`、`findings.md`、`corrections.md` 或 `changes/**`，这些由 `paceflow:artifact-writer` 统一维护。主 session 也不能手写 `<!-- APPROVED -->`、`<!-- VERIFIED -->` 或 `verified-date`；C/V 标记必须由 artifact-writer 按 contract 写入。`spec.md` 是项目规格文件，不归 artifact-writer 管理，仍允许主 session 按项目需要编辑。
-
-Agent 派遣前会校验必填字段：`create-chg` 需要预留编号、标题和任务；`approve-and-start` 需要批准来源、证据和 `task-id`；`close-chg` 需要主 session 已运行并读取验证结果，且提供 `verify-summary` 与 `walkthrough-summary`。更新、验证、归档已有 CHG 必须显式写 `target: CHG-...`，不能只在正文中提到 ID。
-
-### 任务面板边界
-
-Claude 任务面板只是主模型的工作记忆，不是 PACEflow artifact 权威。PACEflow 不注册 `TodoWrite`、`TaskCreate`、`TaskUpdate` hook，也不要求主模型把面板步骤同步成 T-NNN。继续、恢复或收口已有 CHG 前，模型应读取 `changes/<id>.md` 的任务清单、实施详情和工作记录；最终判断以 CHG 详情文件为准。
-
-### 终态修复与工具失败恢复
-
-PostToolUse 默认只做 schema、wikilink、归档和 correction 提醒。少数机械终态问题使用 `decision:"block" + continue:true` one-shot 修复，目前只用于 artifact-writer 写 `walkthrough.md` 后缺正确 wikilink 或 `[worktree:: ...] [branch:: ...]` 上下文的场景。
-
-PostToolUseFailure 会在写入或验证工具失败后提醒模型不要把失败调用视为完成。SubagentStop 观察 artifact-writer 报告标题和状态，并在 close/archive 已离开活跃索引后兜底关闭 owner。
+- **Worktree 共享**：Git worktree 与 `.claude/worktrees/*` 的 PACEflow artifact 和 `.pace` 运行态归一到宿主 Project Root，不分裂出独立 `task.md` / `changes/`；普通代码文件仍写当前 worktree。
+- **并发**：CHG 编号原子预留、写入按资源加锁，允许多 worktree 并行写代码、共享索引串行；`.pace` 控制面文件（lock / sequence / reservation）不可手写，冲突时等待或重试、不删锁。
+- **写保护**：`task.md` / `walkthrough.md` / `findings.md` / `corrections.md` / `changes/**` 以及 `<!-- APPROVED -->` / `<!-- VERIFIED -->` 标记只由 `artifact-writer` 写入，主 session 直写会被 deny；`spec.md` 例外，由你维护。
+- **状态权威**：`changes/<id>.md` frontmatter 是 CHG 状态权威，索引 checkbox 只做展示；Claude 任务面板是工作记忆、不是 artifact 权威，不一致时以详情文件为准。
 
 ---
 
@@ -326,11 +234,10 @@ PACEflow 分两层检测项目是否需要 PACE 流程。**强信号自动激活
 
 > `disable` / `pause` 是用户的退出权，不是 AI 绕过门控的手段：被 PACE deny 拦住时正确做法是走流程（建 CHG / approve-and-start），而非自行 disable/pause。
 
-### 防无限循环
-
-Stop hook 连续阻止 3 次后自动降级为放行，防止 AI 陷入死循环。SessionStart 重置计数器。
-
 ---
+
+<details>
+<summary><strong>技术细节（项目结构、Hook I/O 协议、状态文件、兼容性）</strong></summary>
 
 ## 项目结构
 
@@ -392,11 +299,6 @@ paceflow/
 │   └── skills/audit/                 #   PaceFlow 自身审计流程
 └── tests/                            # Hook + agent contract 测试
 ```
-
----
-
-<details>
-<summary><strong>技术细节（Hook I/O 协议、状态文件、兼容性）</strong></summary>
 
 ## Hook I/O 协议
 
@@ -473,6 +375,7 @@ paceflow/
 
 | 版本 | 日期 | 主要变更 |
 |------|------|----------|
+| v7.2.29 | 2026-06-23 | **README 大幅重写 + 仪式降本（resume-per-CHG / batch-record-finding）（CHG-20260623-01/02/03 + HOTFIX-20260623-01）**：**README（CHG-03）**——定位从「强制顺序 / 辩护为什么值得用」改为「诚实描述做什么」，按 standard-readme 规范骨架瘦身 596→491 行：删动机辩护段（*Lost in the Middle* 引证、「它适合谁」价值论证、「和 TDD 关系」辩护）、install/quickstart 前置、内部编排机制压缩（核心功能模块 38→8 行）+ 项目结构折进 `<details>`、营销腔清除；连带 doc-sync 修 REFERENCE.md / change-analysis.js 对旧小节名「v6 用户升级到 v7」（现「升级与迁移」）的反向引用。**仪式降本**（change-set ceremony-cost-reduction，前提结论：artifact-writer 成本大头是每次 dispatch 重载 ~60KB 静态规范 × dispatch 次数，非 schema/index 逻辑）：**batch-record-finding（CHG-02）**——record-finding 加 batch（共享头 `finding-batch-total` + `--- FINDING i/N ---` 块，复刻 create-chg batch、减 reserved-id、加 slug 碰撞两层防：gate 拦同批重复 title + agent 侧 `test -e` 加 `-2/-3` 后缀），R 阶段批量路由 N 条 backlog finding 从 N 次 dispatch 收成 1 次；抽 `splitLabeledBlocks` 共享分块、create-chg 逐字节零回归。**resume-per-CHG（CHG-01 + HOTFIX-01）**——pace-workflow skill 加可选编排：同一 CHG 生命周期复用同一 artifact-writer（create=fresh spawn 捕 agentId，后续 op=`SendMessage(agentId)` resume 同一 agent），soft 优化、agentId 不可用/SendMessage 失败回退 fresh、不软化任何门（实测 resumed agent `agentType` 保留→写门/marker/写盘锁照 fire；字段门 SendMessage 绕过但 agent 第三层 fail-closed 兜底）；HOTFIX-01 精简该 skill 子节 20→6 行（rationale 归 CHG detail + finding，不占主 session 上下文）。`node tests/run-all.js` 8/8；新增 BFG-1..8 batch finding gate E2E；本轮 4 个 artifact 全程 dogfood（含 resume-per-CHG 实跑：create fresh spawn + approve/close SendMessage resume）；opus 对抗审计三份（README 事实准确性 / batch gate 旁路+create-chg 回归 / resume skill 指令断言）均无 P0/P1。 |
 | v7.2.28 | 2026-06-22 | **工程卫生收尾——修 FSW-1 + 补齐 monitor-guard 对称模块 + README 定位 trim/CI badge（CHG-20260622-04/05）**：CI 三平台绿后的工程卫生一批（含此前攥着的 README 改动一并发）。**FSW-1（CHG-04）**——`migrate/fix-slug-wikilinks.js` 的 parseArgs 加未知参数 fail-closed，`--dryrun` 等拼写错误从静默吞真写 artifact 改为报错 exit 2，对齐 CHG-20260620-01 给其他 CLI helper 补的 unknown-flag 对称（17 条 finding backlog triage 判定的唯一日常可达真 bug）。**monitor-guard（CHG-05）**——深度研究 pre-tool-use.js（1438 行）结论：之前 `eca8c7c` 已抽走 5 个 guard 模块、剩 80% 是必要 dispatch 编排内聚（硬拆高风险 + `GOLDEN structural` 按源文本锁 DENY_REASONS 的陷阱），故只做唯一低风险一致性抽取——把 Monitor 两段 deny 文案构造器（`monitorArtifact*DenyReason`）逐字搬进新 `pre-tool-use/monitor-guard.js`（与 bash/powershell guard 对称，Monitor 命令检测复用 bash 探测器故只承载文案），`isMonitorTool` 按惯例留主文件；+3 MON 单测把原仅 substring 松覆盖的 Monitor 文案提升为关键句级。**诚实记录**：codex「拆巨型 hook」对当前 pre-tool-use.js 基本不成立，不为减行数硬拆 dispatch 核心。**README**——定位段删一行替蓄意破坏写的防御性免责（「不防刻意绕过/蓄意作弊」属对着防风打火机吹气、不入说明书）改为中性的暂停/停用说明 + 顶部加 CI badge。`node tests/run-all.js` 8/8（pace-utils 305 +MON-1/2/3、hooks-e2e 含 Monitor dispatch + 读源文本 structural 测试全绿证行为零改变）。附 findings backlog 一次性 disposition：FSW-1 标 accepted、SO-1 stale + 7 条 won't-fix（ES/E5/LK-1/GS/emit-deny-log/foreign-worktree/budget-head）标 rejected、CHG-20260622-03（ROI）取消归档，active backlog 17→7。 |
 | v7.2.27 | 2026-06-22 | **修 run-all 的 plugin-validate 在 Windows spawn 失败——`claude.cmd` shim 需 shell 解析（CHG-20260622-02 T-003 Windows 收尾）**：v7.2.26 CI 进展到 **ubuntu ✅ + macos ✅**（hermetic 修复生效），仅剩 **windows-latest ❌**，且精确隔离到 `plugin-validate` 单套件、**3ms 瞬挂**——其余 7 套件（含 pace-utils、agent-helpers 的 /tmp 修复）Windows 全绿。根因：`run-all.js:78` 用 `execFileSync('claude', args)` 跑 plugin-validate，而 Windows 上 `npm install -g @anthropic-ai/claude-code` 装的是 `claude.cmd` shim，Node 的 execFileSync 不走 PATHEXT 解析 `.cmd`（且新版 Node 出于安全禁止无 shell 直跑 `.cmd`/`.bat`）→ ENOENT 瞬挂。修法：plugin-validate 套件加 `shell: process.platform === 'win32'`，execFileSync 透传 `shell: s.shell`——Windows 经 cmd.exe 的 PATHEXT 解析 `claude.cmd`，POSIX 保持 `shell:false` 行为不变（仅此一个非 node 命令需要，node 套件用 `process.execPath` 绝对路径无碍）。验证：POSIX `node tests/run-all.js` 8/8（plugin-validate/run-all-self 不回归）；Windows 端只能由 CI 实测验证（再次印证「Windows 不可本地自证」）。纯测试基建改动。三平台 CI 全绿后 CHG-20260622-02 T-003 闭环。 |
 | v7.2.26 | 2026-06-22 | **CI 首跑即抓到价值——修 pace-utils 21 测试非自洽（依赖 ambient `PACE_VAULT_PATH` 的假绿）**（CHG-20260622-02 T-003 闭环）：v7.2.25 的三平台 CI 首跑**全三平台**（含 ubuntu，与维护者本地同 POSIX 环境）都挂 `run-all 7/8`——失败的不是平台、也不是新增的 /tmp 改动，而是 `pace-utils` 21 个 vault/PACE_PROJECT_NAME/scanRelatedNotes/WIKI 测试。根因：`constants.js:28 VAULT_PATH = process.env.PACE_VAULT_PATH || ''` 在 require 时固化，而 `test-pace-utils.js` require 前从不设 env，于是这些测试**依赖维护者 shell 的 ambient `PACE_VAULT_PATH`**——干净环境（CI 无此变量）下 `VAULT_PATH=''`、`path.join('','projects',name)` 退化为相对路径 `projects/<name>` 致断言崩。本地长期 `8/8` 全靠 shell 变量撑出的**假绿**，CI 第一次在干净环境跑 `run-all` 就抓到了（印证「干净环境与目标平台一样不可本地自证」，扩展 [[cross-platform-fix-needs-target-platform-run]]）。修法：`test-pace-utils.js` 在 require pace-utils **之前**把 `PACE_VAULT_PATH` 固定为进程私有临时 vault 根（`os.tmpdir()/pace-test-vault-root`），让测试自洽（hermetic），副带不再污染真实 Obsidian vault。验证：`env -u PACE_VAULT_PATH node tests/run-all.js` 8/8（pace-utils 302/302，本地精确复现并消除 CI 干净环境失败）；手动 R 复核无 P0-P2。纯测试改动，不动 marketplace runtime。三平台 CI 转绿后 CHG-20260622-02 T-003 闭环。 |
@@ -586,4 +489,4 @@ v5 历史快照见 `CHANGELOG.md`；v6 当前历史以本表为准。
 
 ---
 
-**版本**: v7.2.28 | **运行时**: Node.js | **平台**: Windows / macOS / Linux | **协议**: PACE (Plan-Artifact-Check-Execute-Verify-Review)
+**版本**: v7.2.29 | **运行时**: Node.js | **平台**: Windows / macOS / Linux | **协议**: PACE (Plan-Artifact-Check-Execute-Verify-Review)

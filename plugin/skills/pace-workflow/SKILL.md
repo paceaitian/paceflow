@@ -183,6 +183,15 @@ PreToolUse 放行条件：活跃 CHG 在 `task.md` 存在，详情文件存在�
 
 方案根本性错误时：将当前任务标 `[!]`，停止写代码，重新说明偏差并回到 A/C；更新方案和重新批准也必须通过 artifact writer。
 
+### resume-per-CHG 编排（可选降本）
+
+连续执行同一个 CHG 时，复用同一个 artifact-writer 省掉每次 fresh spawn 的规范重载：
+
+- **create-chg**：fresh `Agent` spawn，捕获返回的 `agentId`。
+- **同一 CHG 的后续 op**（approve-and-start / update-status / verify / review / append / close-chg）：`SendMessage(to: <agentId>)` resume 同一 agent，不重新 spawn。
+
+可选优化，不软化任何门：agentId 不可用（新 session / compact / agent 退出）或 SendMessage 失败 → 回退 fresh spawn；resume 时仍须带齐该 op 全部必填字段（agent 第三层仍校验）。create-chg 不走 resume（须 fresh spawn 过 reservation + 字段门取编号）。
+
 ---
 
 ## V (Verify)

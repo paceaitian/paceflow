@@ -3357,6 +3357,102 @@ test('BCG-7. batch deny 文案含多块模板骨架（--- CHG i/N --- + change-s
   assert.ok(r.stdout.includes('change-set-total'), 'deny 文案应含 change-set-total 模板字段');
 });
 
+// batch record-finding（BFG）：agent-lifecycle-guard 确定性校验。复刻 batch create-chg 但
+// finding 无 reserved-id（不走预留门），新增 slug 碰撞防线——同批重复 title 必产相同 date-slug 文件名。
+function batchFindingPrompt(dir, blocks, { total } = {}) {
+  const header = [
+    `artifact_dir: ${dir.replace(/\\/g, '/')}/`,
+    'operation: record-finding',
+    `finding-batch-total: ${total === undefined ? blocks.length : total}`,
+  ];
+  const blockLines = blocks.map((b, i) => [
+    `--- FINDING ${b.seq || i + 1}/${b.n || blocks.length} ---`,
+    ...(b.title === null ? [] : [`title: ${b.title}`]),
+    'summary: 摘要',
+    'type: research',
+    'impact: P3',
+    'body: 正文',
+  ].join('\n'));
+  return [...header, ...blockLines].join('\n');
+}
+
+test('BFG-1. batch record-finding 带齐 2 块 + title 互异 → 放行', () => {
+  const dir = makeV6Project('bfg-ok', { withIndex: false, detail: false });
+  const prompt = batchFindingPrompt(dir, [{ title: 'finding 甲' }, { title: 'finding 乙' }]);
+  const r = runBatchAgent(dir, 'sid-bfg-ok', prompt);
+  assert.strictEqual(r.code, 0);
+  assert.ok(!r.stdout.includes('"deny"'), 'batch finding 带齐应放行');
+  assert.ok(r.stdout.includes('ARTIFACT_DIR 已确认'));
+});
+
+test('BFG-2. batch finding 同批重复 title → DENY（slug 碰撞防线）', () => {
+  const dir = makeV6Project('bfg-dup-title', { withIndex: false, detail: false });
+  const prompt = batchFindingPrompt(dir, [{ title: '同一个标题' }, { title: '同一个标题' }]);
+  const r = runBatchAgent(dir, 'sid-bfg2', prompt);
+  assert.ok(r.stdout.includes('"deny"'), '重复 title 应 deny（会碰撞）');
+  assert.ok(r.stdout.includes('碰撞') || r.stdout.includes('重复'));
+});
+
+test('BFG-3. batch finding finding-batch-total 与块数不符 → DENY', () => {
+  const dir = makeV6Project('bfg-count', { withIndex: false, detail: false });
+  const prompt = batchFindingPrompt(dir, [{ title: 'a', n: 3 }, { title: 'b', n: 3 }], { total: 3 });
+  const r = runBatchAgent(dir, 'sid-bfg3', prompt);
+  assert.ok(r.stdout.includes('"deny"'));
+  assert.ok(r.stdout.includes('finding-batch-total') || r.stdout.includes('块数'));
+});
+
+test('BFG-4. finding-batch-total>1 但无 --- FINDING 块 → DENY', () => {
+  const dir = makeV6Project('bfg-no-blocks', { withIndex: false, detail: false });
+  const prompt = [
+    `artifact_dir: ${dir.replace(/\\/g, '/')}/`, 'operation: record-finding', 'finding-batch-total: 2',
+    'title: 单条标题', 'summary: s', 'type: research', 'impact: P3', 'body: b',
+  ].join('\n');
+  const r = runBatchAgent(dir, 'sid-bfg4', prompt);
+  assert.ok(r.stdout.includes('"deny"'), 'total>1 但无块应 deny');
+  assert.ok(r.stdout.includes('--- FINDING') || r.stdout.includes('块'));
+});
+
+test('BFG-5. batch finding 某块缺 title → DENY（含块号）', () => {
+  const dir = makeV6Project('bfg-no-title', { withIndex: false, detail: false });
+  const prompt = batchFindingPrompt(dir, [{ title: '有标题' }, { title: null }]);
+  const r = runBatchAgent(dir, 'sid-bfg5', prompt);
+  assert.ok(r.stdout.includes('"deny"'), '缺 title 应 deny');
+  assert.ok(r.stdout.includes('title'));
+});
+
+test('BFG-6. 单 record-finding（无 --- FINDING 块）走现有路径放行（回归）', () => {
+  const dir = makeV6Project('bfg-single-regression', { withIndex: false, detail: false });
+  const prompt = [
+    `artifact_dir: ${dir.replace(/\\/g, '/')}/`, 'operation: record-finding',
+    'title: 单条 finding', 'summary: s', 'type: research', 'impact: P3', 'body: b',
+  ].join('\n');
+  const r = runBatchAgent(dir, 'sid-bfg6', prompt);
+  assert.strictEqual(r.code, 0);
+  assert.ok(!r.stdout.includes('"deny"'), '单条 finding 应回归放行');
+  assert.ok(r.stdout.includes('ARTIFACT_DIR 已确认'));
+});
+
+test('BFG-7. batch finding deny 文案含多块模板骨架（--- FINDING i/N --- + finding-batch-total）', () => {
+  const dir = makeV6Project('bfg-template', { withIndex: false, detail: false });
+  const prompt = batchFindingPrompt(dir, [{ title: 'dup' }, { title: 'dup' }]);
+  const r = runBatchAgent(dir, 'sid-bfg7', prompt);
+  assert.ok(r.stdout.includes('"deny"'));
+  assert.ok(r.stdout.includes('--- FINDING'), 'deny 文案应含 batch 多块模板骨架');
+  assert.ok(r.stdout.includes('finding-batch-total'), 'deny 文案应含 finding-batch-total 模板字段');
+});
+
+test('BFG-8. batch finding 块内 title 为空（值在下一行）→ DENY（不被跨行吞值绕过）', () => {
+  const dir = makeV6Project('bfg-empty-title', { withIndex: false, detail: false });
+  const prompt = [
+    `artifact_dir: ${dir.replace(/\\/g, '/')}/`, 'operation: record-finding', 'finding-batch-total: 2',
+    '--- FINDING 1/2 ---', 'title:', 'summary: s', 'type: research', 'impact: P3', 'body: b',
+    '--- FINDING 2/2 ---', 'title: 有标题', 'summary: s', 'type: research', 'impact: P3', 'body: b',
+  ].join('\n');
+  const r = runBatchAgent(dir, 'sid-bfg8', prompt);
+  assert.ok(r.stdout.includes('"deny"'), '空 title 必须 deny（不能被吞下一行 summary: 当 title）');
+  assert.ok(r.stdout.includes('title'));
+});
+
 test('9hc-helper3. reserve-artifact-id helper 支持 record-correction prefix', () => {
   const dir = makeV6Project('agent-reserve-helper-correction', { withIndex: false, detail: false });
   const helper = runReserveHelper({

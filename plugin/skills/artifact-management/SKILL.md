@@ -246,6 +246,8 @@ impact: P0 | P1 | P2 | P3
 body: <完整 Markdown 正文>
 ```
 
+> **多条一次 batch**：要一次记 N 条 finding（如 R 阶段批量路由 P2/P3 backlog），用共享头 `finding-batch-total: N` + N 个 `--- FINDING i/N ---` 块（每块一套完整字段，无需 reserve 编号），省去逐条派遣的重复上下文重载；各块 title 须互异（避免 date-slug 文件名碰撞）。详见 `agent-references/instructions/record-finding.md`「Batch 模式」。
+
 用户纠正类记录使用 `record-correction`；`record-finding` 的 `type` 限于 `research | observation | comparison | bug-report`。
 
 判定不修的 finding 一落地即 won't-fix：传 `status: rejected` + `rejection-reason`（≥10 字符）直接落 `[-]`（已决定不修的追踪记录，不注入 SessionStart，避免技术债污染上下文）；finding `[-]` 语义区别于任务跳过 `[-]` 与 CHG 取消 `[-]`。已记录的 finding 改判不修则派 `update-finding status: rejected`。

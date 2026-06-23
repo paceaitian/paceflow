@@ -47,6 +47,42 @@ body: <完整 Markdown 正文>
 3. Write `changes/findings/finding-yyyy-mm-dd-slug.md`（详情文件结构见下；`body` 必须使用输入原文）
 4. Read + Edit `findings.md`：在活跃区**第一个 finding 索引行之前**插入新索引行（最新在顶，prepend）。活跃区 = 文件头到第一个 `<!-- ARCHIVE -->`；已有 `- [<状态>] [[finding-` 索引行时插到第一个之前，暂无索引行时插到活跃区最后一个标题（`## 未解决问题` 或 `## 摘要索引`）下方。格式见 spec §5.4
 
+## Batch 模式（一次 dispatch 写 N 条 finding）
+
+一次 dispatch 记录多条 finding（仪式降本，复刻 create-chg batch 先例——省去逐条派遣的重复上下文重载）。格式：共享头部 `finding-batch-total: N` + N 个 `--- FINDING i/N ---` 块，每块一个完整 finding 字段集（finding **无需 reserve 编号**，这是与 create-chg batch 的唯一结构差异）。
+
+```text
+artifact_dir: <hook 解析出的 artifact 目录>
+operation: record-finding
+finding-batch-total: 2
+--- FINDING 1/2 ---
+title: <第 1 条 finding 标题>
+summary: <≤200 字摘要>
+type: research | observation | comparison | bug-report
+impact: P0 | P1 | P2 | P3
+body: <完整 Markdown 正文>
+status: <可选，默认 open；判定不修传 rejected + rejection-reason>
+--- FINDING 2/2 ---
+title: <第 2 条 finding 标题（须与其他块不同）>
+summary: ...
+type: ...
+impact: ...
+body: ...
+```
+
+batch 操作：对每个 `--- FINDING i/N ---` 块按上方「操作步骤」单条流程执行（生成 id → Write 详情 → Edit `findings.md` 索引行），逐条写入。索引行同样逐条 prepend（最终物理顺序为批内倒序，符合「最新在顶」）。
+
+### slug 碰撞处理（batch 关键差异）
+
+finding 按 `finding-YYYY-MM-DD-<slug>` 命名、**无 reserved 序号**，同日同 slug 会文件名冲突（create-chg batch 因有 reserved 序号天然无此问题）。两层防：
+
+- **同批**：`agent-lifecycle-guard` 门在派遣前拦截同批重复 title（归一化相等 → 必产同名文件）→ 整批 deny。正常情况各块 title 已互异，不触发。
+- **跨 dispatch / slug 退化**：每条 Write 详情文件**前**，用 `test -e "$ARTIFACT_DIR/changes/findings/finding-yyyy-mm-dd-slug.md" && echo EXISTS` 检查目标；已存在时给 slug 追加计数后缀（`-2` / `-3` …）直到不冲突再 Write，索引行 wikilink 同步用最终 slug。
+
+### batch 事务性
+
+逐条写入；中途某条失败时，报告**已成功写入哪些 finding**（id + 文件）+ 失败条目与原因，主 session 据此续派剩余块（与 create-chg batch 恢复路径同构）。每条 finding 的 SUCCESS 判定独立（body 完整写入 + 索引行插入）。
+
 ## 详情文件结构
 
 ```markdown

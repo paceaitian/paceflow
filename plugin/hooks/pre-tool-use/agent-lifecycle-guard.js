@@ -195,6 +195,28 @@ function promptTemplateForOperation({ prompt = '', artDir = '', operation = '', 
     ].join('\n');
   }
 
+  if (op === 'record-finding-batch') {
+    return [
+      ...lines,
+      'operation: record-finding',
+      'finding-batch-total: <N，必须等于下面 FINDING 块数>',
+      '--- FINDING 1/N ---',
+      'title: <第 1 个 finding 标题（各块 title 须互不相同，避免 date-slug 文件名碰撞）>',
+      'summary: <≤200 字摘要>',
+      'type: research | observation | comparison | bug-report',
+      'impact: P0 | P1 | P2 | P3',
+      'body: <完整 Markdown 正文>',
+      'status: <可选，默认 open；判定不修传 rejected + rejection-reason>',
+      '--- FINDING 2/N ---',
+      'title: <第 2 个 finding 标题>',
+      'summary: <≤200 字摘要>',
+      'type: research | observation | comparison | bug-report',
+      'impact: P0 | P1 | P2 | P3',
+      'body: <完整 Markdown 正文>',
+      '（每块一个完整 finding 字段集，重复到第 N 块；finding 无需 reserve 编号）',
+    ].join('\n');
+  }
+
   if (op === 'record-correction') {
     return [
       ...lines,
@@ -299,28 +321,47 @@ function blockFieldValue(body, field) {
   return m ? m[1].trim() : '';
 }
 
-// 解析 batch create CHG 的 `--- CHG i/N ---` 分块；逐块取 reserved-id / title / 是否含 tasks。
-// 无任何块标记时 isBatch=false（单 CHG / 普通 create-chg 走原路径）。
-function parseBatchBlocks(prompt) {
-  const text = String(prompt || '');
-  const re = /^---[ \t]*CHG[ \t]+(\d+)\/(\d+)[ \t]*---[ \t]*$/gim;
+// 按 `--- <LABEL> i/N ---` 标记切分 batch 块，返回每块 { seq, markerTotal, body }。
+// batch create-chg（LABEL=CHG）与 batch record-finding（LABEL=FINDING）共用同一分块正则，
+// 各自再做块内字段提取（见下方两个 parse* 函数）。单点化有回归风险的分块逻辑。
+function splitLabeledBlocks(text, label) {
+  const re = new RegExp(`^---[ \\t]*${label}[ \\t]+(\\d+)\\/(\\d+)[ \\t]*---[ \\t]*$`, 'gim');
   const markers = [];
   let m;
   while ((m = re.exec(text)) !== null) {
     markers.push({ start: m.index, end: re.lastIndex, seq: Number(m[1]), markerTotal: Number(m[2]) });
   }
-  const blocks = markers.map((mk, idx) => {
+  return markers.map((mk, idx) => {
     const bodyEnd = idx + 1 < markers.length ? markers[idx + 1].start : text.length;
-    const body = text.slice(mk.end, bodyEnd);
-    return {
-      seq: mk.seq,
-      markerTotal: mk.markerTotal,
-      reservedId: blockFieldValue(body, 'reserved-id').toUpperCase(),
-      title: blockFieldValue(body, 'title'),
-      hasTasks: /(?:^|\n)[ \t]*tasks[ \t]*[:=]/i.test(body) || /(?:^|\n)[ \t]*-[ \t]+T-\d/i.test(body),
-    };
+    return { seq: mk.seq, markerTotal: mk.markerTotal, body: text.slice(mk.end, bodyEnd) };
   });
-  return { isBatch: markers.length > 0, blocks };
+}
+
+// 解析 batch create CHG 的 `--- CHG i/N ---` 分块；逐块取 reserved-id / title / 是否含 tasks。
+// 无任何块标记时 isBatch=false（单 CHG / 普通 create-chg 走原路径）。
+function parseBatchBlocks(prompt) {
+  const raw = splitLabeledBlocks(String(prompt || ''), 'CHG');
+  const blocks = raw.map((b) => ({
+    seq: b.seq,
+    markerTotal: b.markerTotal,
+    reservedId: blockFieldValue(b.body, 'reserved-id').toUpperCase(),
+    title: blockFieldValue(b.body, 'title'),
+    hasTasks: /(?:^|\n)[ \t]*tasks[ \t]*[:=]/i.test(b.body) || /(?:^|\n)[ \t]*-[ \t]+T-\d/i.test(b.body),
+  }));
+  return { isBatch: raw.length > 0, blocks };
+}
+
+// 解析 batch record-finding 的 `--- FINDING i/N ---` 分块；逐块取 title（slug 碰撞防线 + 块校验用）。
+// finding 无 reserved-id（不走预留门），其余字段（summary/type/impact/body）与单条 record-finding
+// 一致由 artifact-writer 第三层校验，本门只做 batch 结构 + 同批 title 去重。
+function parseFindingBatchBlocks(prompt) {
+  const raw = splitLabeledBlocks(String(prompt || ''), 'FINDING');
+  const blocks = raw.map((b) => ({
+    seq: b.seq,
+    markerTotal: b.markerTotal,
+    title: blockFieldValue(b.body, 'title'),
+  }));
+  return { isBatch: raw.length > 0, blocks };
 }
 
 function relFromReservedId(id) {
@@ -524,6 +565,47 @@ function agentLifecyclePromptDenyReason(prompt, artDir = '') {
       });
       if (errs.length > 0) {
         return [`batch create CHG 块校验失败：`, ...errs.map(e => `- ${e}`), FORMAT_SNIPPETS.skillRef, '请重派同一个 agent，使用 batch create 多块模板：', tpl].join('\n');
+      }
+    }
+    return '';
+  }
+
+  if (operation === 'record-finding') {
+    const batch = parseFindingBatchBlocks(text);
+    const totalRaw = promptFieldValue(text, 'finding-batch-total');
+    const declaredTotal = /^\d+$/.test(totalRaw) ? Number(totalRaw) : null;
+    const looksBatch = batch.isBatch || (declaredTotal !== null && declaredTotal > 1);
+    if (looksBatch) {
+      const tpl = promptTemplateForOperation({ prompt, artDir, operation: 'record-finding-batch' });
+      const deny = (msg) => [msg, FORMAT_SNIPPETS.skillRef, '请重派同一个 agent，使用 batch record-finding 多块模板：', tpl].join('\n');
+      if (!batch.isBatch) {
+        return deny('batch record-finding（finding-batch-total>1）必须用 `--- FINDING i/N ---` 分隔每个 finding 块，但 prompt 未检测到任何块。');
+      }
+      if (declaredTotal === null) {
+        return deny('batch record-finding 缺少 finding-batch-total（应等于 batch 块数）。');
+      }
+      if (batch.blocks.length !== declaredTotal) {
+        return deny(`batch record-finding 块数（${batch.blocks.length}）与 finding-batch-total（${declaredTotal}）不一致。`);
+      }
+      const errs = [];
+      const seenTitles = new Set();
+      batch.blocks.forEach((b, idx) => {
+        const where = `第 ${idx + 1} 块（--- FINDING ${b.seq}/${b.markerTotal} ---）`;
+        if (b.markerTotal !== declaredTotal) errs.push(`${where} 标记总数 ${b.markerTotal} 与 finding-batch-total ${declaredTotal} 不符`);
+        if (b.seq !== idx + 1) errs.push(`${where} 序号应为 ${idx + 1}`);
+        if (!b.title) {
+          errs.push(`${where} 缺 title`);
+        } else {
+          // finding 无 reserved 序号、按 date-slug 命名，同批同 title 必产同名文件 → slug 碰撞。
+          // 用归一化 title 相等作防线（不复刻 slug 算法：中文 title 转写是 agent 判断，复刻会对
+          // 不同中文 title 假阳性误 deny）；跨 dispatch 同日同 slug 由 record-finding.md 加序号后缀兜底。
+          const key = b.title.trim().toLowerCase().replace(/\s+/g, ' ');
+          if (seenTitles.has(key)) errs.push(`${where} title 与其他块重复（会导致 finding date-slug 文件名碰撞）：${b.title}`);
+          else seenTitles.add(key);
+        }
+      });
+      if (errs.length > 0) {
+        return [`batch record-finding 块校验失败：`, ...errs.map((e) => `- ${e}`), FORMAT_SNIPPETS.skillRef, '请重派同一个 agent，使用 batch record-finding 多块模板：', tpl].join('\n');
       }
     }
     return '';
