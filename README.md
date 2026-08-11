@@ -6,11 +6,29 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
-> **Deterministic workflow gates and persistent implementation records for long-running coding agents.**
+> **Deterministic workflow enforcement and persistent engineering memory for long-running coding agents.**
 
-PACEflow is a Claude Code plugin that enforces a Plan → Artifact → Check → Execute → Verify → Review lifecycle at tool and session boundaries. It keeps implementation state outside the model context, restores that state across sessions and context compaction, and delegates record-keeping to a dedicated `artifact-writer` agent.
+PACEflow keeps coding agents on a verifiable engineering workflow during long, stateful tasks. It enforces workflow transitions at tool boundaries, persists task state outside the model context, and restores that state across sessions and context compaction.
 
-PACEflow verifies that required workflow steps occurred in the expected order and left auditable records. It does **not** decide whether an implementation is correct: that remains the job of tests, CI, reviewers, the model, and human judgment.
+PACEflow is currently implemented as a **Claude Code plugin**, while its underlying reliability model—deterministic gates, persistent artifacts, verification, and review—addresses problems common to long-running coding agents.
+
+## Why PACEflow?
+
+Long-running coding-agent tasks introduce workflow continuity failures:
+
+- implementation begins before the plan is approved;
+- task state drifts during a long session;
+- important context disappears after compaction or a new session;
+- verification or review is skipped at closure;
+- process instructions written only in prompts remain probabilistic.
+
+PACEflow addresses these failures at the workflow layer. Instead of asking the model to remember every transition, it places deterministic hooks around tool use and session completion, persists the working state, and delegates record-keeping to a dedicated `artifact-writer` agent.
+
+## Deterministic gates, not deterministic intelligence
+
+The model still plans, implements, verifies, and reviews the code. A PACEflow gate confirms that a required step occurred in the expected order and left an auditable record; it does not claim that the result of that step is correct.
+
+`VERIFIED` means verification was performed and recorded. `REVIEWED` means review was performed and recorded. Correctness remains the responsibility of tests, CI, reviewers, model capability, and human judgment.
 
 ## What PACEflow does
 
