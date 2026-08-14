@@ -350,7 +350,7 @@ paceflow/
 
 ## Subagent / Agent Teams 兼容性
 
-**Subagent**（Task 工具）：在主进程内执行，共享 hooks，所有 hook 均生效。
+**Subagent**（Task / Agent 工具）：共享 hooks，工具调用全部过 PACEflow 门（写码门 / artifact 保护对 subagent 同样生效）。宿主 v2.1.232 起派遣默认 background、结果以通知回流；artifact-writer 写状态机标记或取编号的 op（create / approve / verify / review / close）必须逐次 fresh spawn 派遣，详见 REFERENCE。
 
 **Agent Teams**：独立平级进程（≠ subagent 的主进程内子调用），各自加载 hooks。定位 **teammate = 纯执行者**，任务管理（批准 / 建 CHG / 改状态 / 归档）归主 session 单一权威源。`isTeammate()` 自动检测后：
 - **流程引导类** deny（artifact-root 选择、native plan 桥接——需主 session 交互完成）→ 降级为 HINT（避免死锁 teammate）

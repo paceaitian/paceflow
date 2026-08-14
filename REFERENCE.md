@@ -214,7 +214,9 @@ PreToolUse 的拒绝分三档。**teammate 模式（`CLAUDE_CODE_TEAM_NAME` 非�
 
 **日志 action 的 `_TEAMMATE` 后缀 ≠ 被降级。** marker 伪造、runtime-control 等带 `_TEAMMATE` 后缀但走 `hardDeny`，teammate 下仍硬阻断——后缀只标记"在 teammate 进程触发"，不代表软化。
 
-**teammate ≠ subagent。** subagent（Task / Agent 工具）在主进程内执行、结果回流主 session、共享主 session 上下文、不独立触发 PACE owner；teammate 是独立平级 session，有自己的 session_id。调研 fan-out 这类「给结果就好、回流主 session」的场景应用 subagent，不用 teammate。
+**teammate ≠ subagent。** subagent（Task / Agent 工具）共享主 session 的 hooks 与 artifact 管辖、结果回流主 session、不独立触发 PACE owner；宿主 v2.1.232 起派遣默认 background（结果以通知回流），其工具调用仍全部过 PACEflow 门。teammate 是独立平级 session，有自己的 session_id。调研 fan-out 这类「给结果就好、回流主 session」的场景应用 subagent，不用 teammate。
+
+**artifact-writer 派遣模式（宿主 async 化适配）**：artifact-writer 只经 `Agent` 工具直接派遣，不经 `Workflow` 的 `agentType` 参数（workflow 内部 spawn 不触发 Agent 派遣门，其子 agent 的 artifact 写入会被完整性门拒绝）。写状态机标记或取编号的 op（`create-chg` / `approve` / `approve-and-start` / `verify` / `review` / `close-chg`）必须逐次 fresh spawn——派遣门在 PreToolUse:Agent 时刻校验必填字段与 V→R 偏序，`SendMessage` resume 不触发该门（同时跳过 target 必填与 change-owner 归属校验）；仅 `update-status` / `append` 这类只写进度记录的 op 可用 resume 复用同一 agent 降本。
 
 ---
 

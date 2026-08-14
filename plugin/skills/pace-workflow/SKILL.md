@@ -183,14 +183,16 @@ PreToolUse 放行条件：活跃 CHG 在 `task.md` 存在，详情文件存在�
 
 方案根本性错误时：将当前任务标 `[!]`，停止写代码，重新说明偏差并回到 A/C；更新方案和重新批准也必须通过 artifact writer。
 
-### resume-per-CHG 编排（可选降本）
+### resume-per-CHG 编排（可选降本，仅限不写状态机标记的 op）
 
-连续执行同一个 CHG 时，复用同一个 artifact-writer 省掉每次 fresh spawn 的规范重载：
+连续执行同一个 CHG 时，可复用同一个 artifact-writer 省掉 fresh spawn 的规范重载。判据是**该 op 写的东西会不会被其他确定性门当判据消费**：
 
-- **create-chg**：fresh `Agent` spawn，捕获返回的 `agentId`。
-- **同一 CHG 的后续 op**（approve-and-start / update-status / verify / review / append / close-chg）：`SendMessage(to: <agentId>)` resume 同一 agent，不重新 spawn。
+- **可 resume**（`SendMessage(to: <agentId>)`）：`update-status`、`append`（work-record / implementation）——只写进度与记录。resume 会跳过 update-status 自己的派遣门（`[!]` 必带 status-reason、不得与 verify 串派），但它们保护的是记录完整性、agent 第三层有对应自校验，影响止于本 CHG 的记录质量。
+- **必须 fresh spawn**：`create-chg`（reservation 取编号）、`approve` / `approve-and-start` / `verify` / `review` / `close-chg`——写 APPROVED / VERIFIED / REVIEWED 与归档态，被写码门、Stop 门和 V→R 偏序门消费；且 V→R 偏序只实现在 hook 侧、agent 契约无对应自校验，resume 路径零兜底。
 
-可选优化，不软化任何门：agentId 不可用（新 session / compact / agent 退出）或 SendMessage 失败 → 回退 fresh spawn；resume 时仍须带齐该 op 全部必填字段（agent 第三层仍校验）。create-chg 不走 resume（须 fresh spawn 过 reservation + 字段门取编号）。
+`SendMessage` 不在 PACEflow 任何 PreToolUse matcher 内（`hooks.json`），宿主 v2.1.232 实测亦不为其触发——resume 跳过的不止字段门，还有 target 必填与 change-owner 归属校验。agentId 不可用（新 session / compact / agent 退出）或 SendMessage 失败 → 回退 fresh spawn。
+
+**artifact-writer 只经 `Agent` 工具直接派遣**：不经 `Workflow` 的 `agentType` 参数派遣（workflow 内部 spawn 不触发 Agent 派遣门，且其子 agent 身份为 `workflow-subagent`，artifact 写入会被完整性门拒绝）。
 
 ---
 
@@ -225,7 +227,7 @@ artifact writer 会同时写：
 
 1. **看本 CHG diff**：先过一遍本次 CHG 的实际改动（改了哪些文件、哪类逻辑），作为选审查棱镜的依据。
 2. **按内容自选 review agent，用方法论 direct**：根据改动内容选合适的审查视角（逻辑/边界改动→路径追踪棱镜；多文件对齐→一致性/实际 diff 棱镜；契约/配置/安全→协议合规棱镜；琐碎小改→主 session 自己瞄一眼 `review-source: manual`），**不固化一套标准 agent**。用 `references/review-methodology.md` 的七条内核 direct 所派 subagent，要求其输出 **P0-P3 分级报告**。
-   > **执行约束（硬性）**：审计 subagent 必须 **inline / foreground 派发**（Task / Agent 工具同步等待），**不可作为 background / detached 任务**。inline 时主 session 阻塞在 tool call 上（mid-turn），审计必然在本轮收尾前返回；若错误派成 background，主 session 可能在审计在途时就 end-turn，撞上 Stop 的"未审计"拦截。
+   > **执行约束（硬性）**：审计报告未返回、findings 未路由前，**不收尾本轮**。宿主 v2.1.232 起 Agent 派遣默认 background：能同步派发（`run_in_background: false` 可用）就同步派发，这是唯一有构造性保证的方式。只能 background 派发时，主 session 必须停在等待状态直到报告返回并路由完 findings——**此处没有确定性兜底**：R 阶段 CHG 仍是 `running` + 任务 pending，Stop 的「未审计」拦截要到 `closing-required` 才生效，而后台任务在跑时 `running` 分支本身会软放行。提前 end-turn 不会被任何门拦住，全靠本约束。
 3. **读 P0-P3 报告**：P0=有具体触发路径的功能错误/数据丢失/流程阻塞；P1=高影响但不直接阻塞；P2=代码质量/文档过时；P3=优化建议。
 4. **路由 findings**（主 session 判断，调既有 writer 操作）：
    - **修前复核（路由到「修」的前置）**：review 报告是**待评估建议、非命令**。路由任何 finding 去「修」前，主 session 用三件武器（最小复现 / 路径追踪 / 设计意图查证）**独立复核为真**，复核不下来就不修（降级 / `record-finding` / won't-fix）。subagent 的 Phase 2 不替代这一步。细节见 [references/review-methodology.md](references/review-methodology.md) step 4。

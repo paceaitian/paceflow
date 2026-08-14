@@ -101,7 +101,7 @@ R 阶段是**主 session 的编排活**（派 subagent、读报告、判断 find
    - **P3**：优化建议 / 风格改进。
    - 报告须含：每条 finding 的 `文件:行号 + 触发路径或证据 + 影响 + 建议`，以及第 7 条要求的审查基线与证据来源。
 
-   > **执行约束（硬性）**：审计 subagent 必须 **inline / foreground 派发**（Task / Agent 工具同步等待），**不可作为 background / detached 任务**。理由：inline 派发时主 session 阻塞在 tool call 上（mid-turn），审计必然在本轮收尾之前返回；若错误地派成 background，主 session 可能在审计在途时就 end-turn，撞上 Stop 的"未审计"拦截。
+   > **执行约束（硬性）**：审计报告未返回、findings 未路由前，**不收尾本轮**。宿主 v2.1.232 起 Agent 派遣默认 background：能同步派发（`run_in_background: false` 可用）就同步派发，这是唯一有构造性保证的方式。只能 background 派发时，主 session 必须停在等待状态直到报告返回并路由完 findings——**此处没有确定性兜底**：R 阶段 CHG 仍是 `running` + 任务 pending，Stop 的「未审计」拦截要到 `closing-required` 才生效，而后台任务在跑时 `running` 分支本身会软放行。提前 end-turn 不会被任何门拦住，全靠本约束。
 
 4. **读 P0-P3 报告并路由 findings**（主 session 判断，调既有 writer 操作）：
    - **修前复核（主 session 自核，路由到「修」的前置）**：把 review subagent 的报告当**待评估的建议、不是待执行的命令**。路由任何 finding 去「修」之前，主 session 必须用三件武器（最小复现 / 路径追踪 / 设计意图查证）**独立复核 finding 为真**；复核不下来就不修——降级 / `record-finding` / won't-fix。subagent 的 Phase 2 验证**不替代**这一步（原始发现误报率 50-80%，主 session 是落到「修」前的最后一道复核）。
