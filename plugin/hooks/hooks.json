@@ -93,6 +93,18 @@
         ]
       }
     ],
+    "SubagentStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/subagent-start.js"]
+          }
+        ]
+      }
+    ],
     "SubagentStop": [
       {
         "matcher": "",

@@ -142,6 +142,7 @@ const DENY_REASONS = {
   DENY_V6_MARKER:                  { category: 'integrity',      escapeHatch: true, dirHint: false, teammateMode: 'hard' },
   // —— raw（无富化, teammate hard）——
   DENY_AGENT_NEWER_SCHEMA:           { category: 'schema-version', escapeHatch: false, dirHint: false, teammateMode: 'hard' },
+  DENY_AGENT_NAMED_DISPATCH:         { category: 'agent-dispatch', escapeHatch: false, dirHint: false, teammateMode: 'hard' },
   DENY_AGENT_ARTIFACT_DIR:           { category: 'agent-dispatch', escapeHatch: false, dirHint: false, teammateMode: 'hard' },
   DENY_AGENT_LIFECYCLE_PROMPT:       { category: 'agent-dispatch', escapeHatch: false, dirHint: false, teammateMode: 'hard' },
   DENY_AGENT_LEGACY_ARTIFACT_LOCK:   { category: 'concurrency',    escapeHatch: false, dirHint: false, teammateMode: 'hard' },
@@ -440,6 +441,17 @@ paceUtils.withStdinParsed((stdin) => {
           emitDeny(`DENY_AGENT_NEWER_SCHEMA${teammateTag}`, reason, { max_version: newerSchema.maxVersion });
           return;
         }
+      }
+      // CHG-20260814-02:宿主对命名 agent 的 SubagentStop 会把 agent_type 换成自定义 name(实测),
+      // 命名派遣会让锁释放/owner 收口/报告观察整体静默失效——从源头拦截,resume 寻址用 spawn 返回的
+      // agentId 即可,artifact-writer 不需要 name。
+      if (isArtifactWriterAgentTool(stdin) && String((stdin.toolInput && stdin.toolInput.name) || '').trim()) {
+        const reason = 'artifact-writer 派遣不得带 name 参数:命名派遣在部分场景(如 team 命名 teammate,2026-08-14 日志实拍)会让 SubagentStop 的 agent_type 变成自定义 name,破坏收口识别(锁释放 / owner 关闭 / 报告观察)。请移除 name 字段后重派同一 prompt;需要 resume 时用 spawn 返回的 agentId 寻址,不依赖 name。';
+        emitDeny(`DENY_AGENT_NAMED_DISPATCH${teammateTag}`, reason, {
+          agent: stdin.toolInput.subagent_type || stdin.toolInput.subagentType,
+          name: String(stdin.toolInput.name || '').slice(0, 40),
+        });
+        return;
       }
       if (isArtifactWriterAgentTool(stdin) && needsArtifactRootChoice) {
         emitDeny(`DENY_AGENT_ARTIFACT_ROOT_CHOICE${teammateTag}`, artifactRootChoiceReason, {

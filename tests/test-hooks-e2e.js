@@ -7903,6 +7903,97 @@ test('23c. SubagentStop 在 close/archive 已离开活跃索引后兜底标记 o
   assert.strictEqual(owner.operation, 'close-chg');
 });
 
+test('23h. SAS-N1: artifact-writer 派遣带 name 参数被硬拒（agent_type 漂移源头门，CHG-20260814-02）', () => {
+  const dir = makeV6Project('sas-named-dispatch');
+  const r = runHook('pre-tool-use.js', {
+    cwd: dir,
+    stdin: {
+      session_id: 'sid-named-writer',
+      tool_name: 'Agent',
+      tool_input: {
+        subagent_type: 'paceflow:artifact-writer',
+        name: 'chg-writer',
+        description: 'named dispatch',
+        prompt: 'operation: update-chg\ntarget: CHG-20260504-01\nsection: work-record\naction: append',
+      },
+    },
+  });
+  assert.strictEqual(r.code, 0);
+  assert.ok(r.stdout.includes('"deny"'), 'named artifact-writer 派遣应 deny');
+  assert.ok(r.stdout.includes('不得带 name 参数'), 'deny 应来自 name 门本身而非其他门（防假绿）');
+  assert.ok(r.stdout.includes('agentId'), 'deny 文案应给出 resume 用 agentId 的替代路径');
+});
+
+test('23i. SAS-N2: 非 artifact-writer 的命名 Agent 派遣不受 name 门影响', () => {
+  const dir = makeV6Project('sas-named-other');
+  const r = runHook('pre-tool-use.js', {
+    cwd: dir,
+    stdin: {
+      session_id: 'sid-named-other',
+      tool_name: 'Agent',
+      tool_input: {
+        subagent_type: 'general-purpose',
+        name: 'my-researcher',
+        description: 'research',
+        prompt: '随便研究点什么',
+      },
+    },
+  });
+  assert.strictEqual(r.code, 0);
+  assert.ok(!r.stdout.includes('"deny"'), '非 artifact-writer 命名派遣应放行');
+});
+
+test('23j. SAS-T1: transcript 兜底不再把 tool_result 文件内容误配为 close/archive 操作（2026-08-14 实锤回归）', () => {
+  const dir = makeV6Project('sas-toolresult-nomatch', {
+    withIndex: false,
+    detail: chgDetail({ status: 'archived', task: '[x]', approved: true, verified: true }),
+    walkToday: false,
+  });
+  const ownerPath = seedChangeOwner(dir, 'CHG-20260504-01', {
+    sessionId: 'sid-sas-nomatch',
+    agentId: 'agent-sas-nomatch',
+    state: 'closing',
+  });
+  // tool_result 里出现 archive-chg + 唯一 CHG id（模拟 agent Read 到的旧文件内容）——不得被当作操作信号
+  const transcriptPath = path.join(dir, 'agent-nomatch.jsonl');
+  fs.writeFileSync(transcriptPath, JSON.stringify({
+    type: 'user',
+    message: {
+      content: [
+        { type: 'tool_result', content: [{ type: 'text', text: 'operation: archive-chg\ntarget: CHG-20260504-01\nwalkthrough-summary: 旧文件内容' }] },
+      ],
+    },
+  }) + '\n', 'utf8');
+  const r = runHook('subagent-stop.js', {
+    cwd: dir,
+    stdin: {
+      session_id: 'sid-sas-nomatch',
+      agent_id: 'agent-sas-nomatch',
+      agent_type: 'paceflow:artifact-writer',
+      agent_transcript_path: transcriptPath,
+      last_assistant_message: '## artifact-writer 报告\n\n**操作**：update-finding\n**状态**：SUCCESS\n',
+    },
+  });
+  assert.strictEqual(r.code, 0);
+  const owner = JSON.parse(fs.readFileSync(ownerPath, 'utf8'));
+  assert.strictEqual(owner.state, 'closing', 'tool_result 内容不得触发 owner close（误配回归）');
+});
+
+test('23k. SST-1: subagent-start logging-only——退出 0 无 stdout 且 OBSERVE 日志落盘', () => {
+  const dir = makeV6Project('sas-start-smoke');
+  const logPath = path.join(dir, 'probe-start.log');
+  const r = runHook('subagent-start.js', {
+    cwd: dir,
+    env: { PACE_LOG_PATH: logPath },
+    stdin: { session_id: 'sid-start-smoke', agent_id: 'a-start-1', agent_type: 'general-purpose' },
+  });
+  assert.strictEqual(r.code, 0);
+  assert.strictEqual(r.stdout, '');
+  const logged = fs.existsSync(logPath) ? fs.readFileSync(logPath, 'utf8') : '';
+  assert.ok(logged.includes('SubagentStart') && logged.includes('OBSERVE'), 'OBSERVE 日志应落盘');
+  assert.ok(logged.includes('agent_id=a-start-1') && logged.includes('agent_type=general-purpose'), '日志应含 agent_id/agent_type 字段');
+});
+
 test('23d. SubagentStop close subagent 停止但 target 仍在活跃索引 → 不误标 owner closed（target-still-active 兜底；CHG-20260616-03 T-003 / P3.11）', () => {
   const dir = makeV6Project('sas-close-target-still-active', {
     indexMark: '[/]',
@@ -9162,7 +9253,7 @@ test('GOLDEN structural: emitDeny \u5355\u51fa\u53e3\u6536\u655b + DENY_REASONS 
   console.log(`  [GOLDEN] \u7ed3\u6784: DENY_REASONS ${tableKeys.size} \u9879\uff1bemitDeny \u6536\u655b ${emitted.size} \u51fa\u53e3\u5168\u5728\u8868\uff1bcensus ${census.length} \u5168\u8986\u76d6\uff1b\u624b\u5199 deny \u51fa\u53e3\u6536\u655b\u81f3 ${denyOutlets}`);
 });
 
-// 结构完整性 part 2（CHG-20260614-17 T-004，codex P3-3）：逐项锁 DENY_REASONS 53 个 action 的
+// 结构完整性 part 2（CHG-20260614-17 T-004，codex P3-3）：逐项锁 DENY_REASONS 54 个 action 的
 // {escapeHatch, dirHint, teammateMode} 三元组。此前结构测试只验 code 在表内 + 出口=2，不验表值；
 // 行为 golden 只锁 33 个可达出口，剩余 deferred action 若富化位（escapeHatch/dirHint/teammateMode）
 // 被写反，两道现有守护都可能仍绿。EXPECTED_DENY_META 是表值 golden——flip 任一位即红，强制维护者
@@ -9204,6 +9295,7 @@ const EXPECTED_DENY_META = {
   DENY_V6_MARKER: 'true|false|hard',
   // raw（无富化, teammate hard）——22
   DENY_AGENT_NEWER_SCHEMA: 'false|false|hard',
+  DENY_AGENT_NAMED_DISPATCH: 'false|false|hard',
   DENY_AGENT_ARTIFACT_DIR: 'false|false|hard',
   DENY_AGENT_LIFECYCLE_PROMPT: 'false|false|hard',
   DENY_AGENT_LEGACY_ARTIFACT_LOCK: 'false|false|hard',
@@ -9227,7 +9319,7 @@ const EXPECTED_DENY_META = {
   DENY_WRITE_ARTIFACT: 'false|false|hard',
 };
 
-test('GOLDEN structural: DENY_REASONS 53 项 {escapeHatch,dirHint,teammateMode} 三元组逐项锁', () => {
+test('GOLDEN structural: DENY_REASONS 54 项 {escapeHatch,dirHint,teammateMode} 三元组逐项锁', () => {
   const src = fs.readFileSync(path.join(HOOKS_DIR, 'pre-tool-use.js'), 'utf8');
   const tableStart = src.indexOf('const DENY_REASONS = {');
   const tableEnd = src.indexOf('\nfunction isArtifactWriterAgent');
@@ -9239,8 +9331,8 @@ test('GOLDEN structural: DENY_REASONS 53 项 {escapeHatch,dirHint,teammateMode} 
     actual[m[1]] = `${m[2]}|${m[3]}|${m[4]}`;
   }
   // 数量一致（防解析漏行 / 表增删未同步期望）
-  assert.strictEqual(Object.keys(actual).length, 53, `DENY_REASONS 应解析 53 项，实际 ${Object.keys(actual).length}`);
-  assert.strictEqual(Object.keys(EXPECTED_DENY_META).length, 53, 'EXPECTED_DENY_META 应 53 项');
+  assert.strictEqual(Object.keys(actual).length, 54, `DENY_REASONS 应解析 54 项，实际 ${Object.keys(actual).length}`);
+  assert.strictEqual(Object.keys(EXPECTED_DENY_META).length, 54, 'EXPECTED_DENY_META 应 54 项');
   // 键集双向一致（新增/删除 action 须同步期望表）
   for (const code of Object.keys(EXPECTED_DENY_META)) assert.ok(code in actual, `EXPECTED 有 ${code} 但实际表缺`);
   for (const code of Object.keys(actual)) assert.ok(code in EXPECTED_DENY_META, `实际表有 ${code} 但 EXPECTED 缺（新增 action 须同步期望表）`);
@@ -9248,7 +9340,7 @@ test('GOLDEN structural: DENY_REASONS 53 项 {escapeHatch,dirHint,teammateMode} 
   for (const [code, expected] of Object.entries(EXPECTED_DENY_META)) {
     assert.strictEqual(actual[code], expected, `${code} 三元组漂移：期望 escapeHatch|dirHint|teammateMode=${expected}，实际 ${actual[code]}`);
   }
-  console.log(`  [GOLDEN] 表值: DENY_REASONS 53 项 {escapeHatch,dirHint,teammateMode} 逐项锁（DIRECT_ARTIFACT_EDIT dirHint:true 例外已锁）`);
+  console.log(`  [GOLDEN] 表值: DENY_REASONS 54 项 {escapeHatch,dirHint,teammateMode} 逐项锁（DIRECT_ARTIFACT_EDIT dirHint:true 例外已锁）`);
 });
 
 // CHG-20260622-01 accepted-risk 锚定测试：锁定已知绕过【现状】（GS-1~4 + ES-1/ES-2，均 P3 backlog accepted-risk，非设计期望）。

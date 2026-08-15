@@ -229,7 +229,7 @@ PreToolUse 的拒绝分三档。**teammate 模式（`CLAUDE_CODE_TEAM_NAME` 非�
 /plugin install paceflow@paceaitian-paceflow
 ```
 
-> 需 Claude Code `2.1.139` 或更高版本：hook 注册使用 `2.1.139` 新增的 `hooks[].args` exec form，`2.1.138` 及更早版本不支持该字段，可能只执行 `command: "node"` 而不传脚本路径，导致 hook 静默不运行（最隐蔽的失效模式）。与 README 安装要求同源。
+> 需 Claude Code `2.1.218` 或更高版本。两个硬依赖：① `hooks[].args` exec form（`2.1.139` 引入，更早版本只执行 `command: "node"` 不传脚本路径）；② `SubagentStart` hook 事件（存在性已实测的最早版本 `2.1.218`）——宿主对插件 hooks.json 里不认识的事件名会**整份静默丢弃该插件全部 hooks**（2026-08-14 三臂对照实测），旧宿主上所有门无提示失效（最隐蔽的失效模式）。与 README 安装要求同源。
 
 安装后应包含：
 - `hooks/`

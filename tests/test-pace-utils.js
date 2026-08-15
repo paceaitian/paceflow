@@ -920,19 +920,24 @@ test('SST-LAZY: inferCloseTarget 廉价 candidate 命中时不读 transcript（l
   }
 });
 
-test('SST-LAZY-FALLBACK: 廉价 candidate 无 close operation 时仍读 transcript 兜底', () => {
+test('SST-LAZY-FALLBACK: transcript 兜底仅提取 user/assistant 消息文本——裸对象/tool_result 不再入选（CHG-20260814-02 收窄）', () => {
   const ict = subagentStop.inferCloseTarget;
   const tdir = makeTmpDir('sst-lazy-fb');
   const tpath = path.join(tdir, 'transcript.jsonl');
-  fs.writeFileSync(tpath, JSON.stringify({ text: 'operation: close-chg\ntarget: CHG-20260303-03' }) + '\n', 'utf8');
-  // 廉价 candidate 全不含 close/archive operation → 惰性读 transcript 兜底仍生效
+  fs.writeFileSync(tpath, [
+    // 裸对象（非 user/assistant 消息结构）排在前——旧的全字符串扫描会先命中它（archive-chg），
+    // 收窄后不再提取；若此行被误配，下面的 close-chg 断言会失败
+    JSON.stringify({ text: 'operation: archive-chg\ntarget: CHG-20260909-09' }),
+    // dispatch prompt 真实形态：user message content——兜底仍生效
+    JSON.stringify({ type: 'user', message: { content: 'operation: close-chg\ntarget: CHG-20260303-03' } }),
+  ].join('\n') + '\n', 'utf8');
   const r = ict({
     toolInput: { prompt: '随便聊聊，无 operation 字段' },
     agentTranscriptPath: tpath,
     raw: {},
   });
-  assert.strictEqual(r.operation, 'close-chg');
-  assert.strictEqual(r.target, 'CHG-20260303-03', 'transcript 兜底仍生效');
+  assert.strictEqual(r.operation, 'close-chg', '裸对象的 archive-chg 不得被提取（收窄负例）');
+  assert.strictEqual(r.target, 'CHG-20260303-03', 'user message 的 dispatch prompt 兜底仍生效');
 });
 
 test('locks 2.6: reservationMatchesArtifactRel 契约锁——fail-open 仅 null 输入 + 真 mismatch 检出（CHG-20260615-02）', () => {

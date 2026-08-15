@@ -59,7 +59,7 @@ CHG/HOTFIX 是连续执行、可验证、可关闭的最小变更单元，不是
 
 ## 安装
 
-当前版本的 hook 注册使用 Claude Code `2.1.139` 新增的 `hooks[].args` exec form。请使用 Claude Code `2.1.139` 或更高版本；`2.1.138` 及更早版本不支持该字段，可能只执行 `command: "node"` 而不传脚本路径，导致 hook 没有实际运行。
+请使用 Claude Code `2.1.218` 或更高版本。两个硬依赖：hook 注册使用 `2.1.139` 新增的 `hooks[].args` exec form（更早版本可能只执行 `command: "node"` 不传脚本路径）；hook 注册面含 `SubagentStart` 事件（存在性已实测的最早版本是 `2.1.218`）——**宿主不认识插件 hooks.json 里的任一事件名时,会把该插件的全部 hooks 整份静默丢弃**（实测），即旧宿主上 PACEflow 所有门会无提示失效。
 
 ```bash
 # 在 Claude Code 中执行（2 条命令）
@@ -67,7 +67,7 @@ CHG/HOTFIX 是连续执行、可验证、可关闭的最小变更单元，不是
 /plugin install paceflow@paceaitian-paceflow
 ```
 
-安装后 9 类 hook 事件、配套 helper 脚本、4 个用户 skill、5 个用户命令和 `artifact-writer` agent 自动注册，零配置。重启 Claude Code 生效。
+安装后 10 类 hook 事件、配套 helper 脚本、4 个用户 skill、5 个用户命令和 `artifact-writer` agent 自动注册，零配置。重启 Claude Code 生效。
 
 > **可选**：设置环境变量 `PACE_VAULT_PATH` 指向你的 Obsidian Vault。新项目首次写代码或派 `artifact-writer` 时，PACEflow 会要求主 session 询问 artifact 存放在 `$PACE_VAULT_PATH/projects/<项目名>/` 还是本地项目目录，并把选择持久化到 Project Root 的 `.pace/artifact-root`；`local` 表示 Project Root 本地目录，不是当前子目录，也不是 `.pace/`。已有 `changes/` 的项目沿用现有位置。真实 Git worktree 和 `.claude/worktrees/<name>` 会自动归一到宿主项目名；也可用 `PACE_PROJECT_NAME` 显式指定项目名。自动化/headless 环境可设置 `PACE_ARTIFACT_ROOT=local|vault|/abs/path` 跳过询问。
 
@@ -182,11 +182,12 @@ brainstorming → writing-plans → pace-bridge（plan 转 CHG）→ auto-APPROV
 
 ## 工作原理
 
-### 9 类 Hook 事件覆盖完整生命周期
+### 10 类 Hook 事件覆盖完整生命周期
 
 | Hook | 触发时机 | 做什么 |
 |------|----------|--------|
 | **SessionStart** | 会话开始 / Compact 后 | 注入索引活跃区 + 活跃 CHG 摘要 |
+| **SubagentStart** | subagent 派遣时 | 仅记录 agent_id/agent_type 做生命周期对账（不阻断不注入） |
 | **PreToolUse:Write/Edit/MultiEdit/Bash/PowerShell/Monitor/Agent** | AI 写代码、运行命令或派 artifact-writer 前 | 无活跃 CHG / 无审批 / 状态不一致 / 直接写 artifact 或 `.pace` 控制面 → deny |
 | **PostToolUse** | AI 写代码后 | schema/wikilink/归档/correction 提醒 |
 | **PostToolUseFailure** | 写入/验证工具失败后 | 提醒不要把失败工具调用视为完成 |
@@ -310,6 +311,7 @@ paceflow/
 | Stop | stdin JSON（stop_hook_active）| stderr + exit 2 | `exit 2` |
 | PreCompact | stdin JSON | 无 stdout（native plan 兜底检测，不写快照）| N/A |
 | PostToolUseFailure | stdin JSON | stdout JSON（additionalContext）| N/A |
+| SubagentStart | stdin JSON | 无 stdout（logging-only）| N/A |
 | SubagentStop | stdin JSON | stdout JSON（additionalContext）| N/A |
 | StopFailure | stdin JSON | 无 stdout | 记录日志 |
 | SessionEnd | stdin JSON（sessionId）| 无 stdout | N/A |

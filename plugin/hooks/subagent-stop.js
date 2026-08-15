@@ -37,18 +37,22 @@ function reportStatus(message) {
   return m ? m[1].toUpperCase() : '';
 }
 
-function collectStrings(value, out = [], depth = 0) {
-  if (depth > 6 || value == null) return out;
-  if (typeof value === 'string') {
-    if (value.trim()) out.push(value);
-    return out;
-  }
-  if (Array.isArray(value)) {
-    value.forEach(item => collectStrings(item, out, depth + 1));
-    return out;
-  }
-  if (typeof value === 'object') {
-    Object.keys(value).forEach(key => collectStrings(value[key], out, depth + 1));
+// CHG-20260814-02:transcript 兜底只提取 user / assistant 消息的文本内容(dispatch prompt 是
+// user 消息、agent 报告是 assistant 消息);tool_result / tool_use 载荷刻意排除——agent Read 的
+// 文件内容经 tool_result 进 transcript,曾把读到的旧 CHG 文案误配为 archive-chg 操作并试图关
+// 无关 owner(2026-08-14 实锤,仅因 owner 恰好不存在未成事故)。非 JSON 行同步不再收集:格式
+// 异常时宁可 SKIP 走 30min TTL 兜底(漏关自愈),不冒误关活跃 owner 的险。
+function messageTextsFromTranscriptLine(parsed) {
+  const out = [];
+  if (!parsed || typeof parsed !== 'object') return out;
+  if (parsed.type !== 'user' && parsed.type !== 'assistant') return out;
+  const content = parsed.message && parsed.message.content;
+  if (typeof content === 'string') { out.push(content); return out; }
+  if (Array.isArray(content)) {
+    for (const block of content) {
+      if (typeof block === 'string') { out.push(block); continue; }
+      if (block && typeof block === 'object' && block.type === 'text' && typeof block.text === 'string') out.push(block.text);
+    }
   }
   return out;
 }
@@ -62,13 +66,15 @@ function readTranscriptStrings(transcriptPath) {
     const fd = fs.openSync(transcriptPath, 'r');
     try {
       const buf = Buffer.alloc(len);
-      fs.readSync(fd, buf, 0, len, Math.max(0, stat.size - len));
+      // 读头部而非尾部:权威信号(dispatch prompt 的 user 消息)恒在 transcript 第 0 行;
+      // 读尾部会在超长 transcript 截掉 prompt、把权威落到 assistant 自述文案(CHG-20260814-02 审计 P3-3)
+      fs.readSync(fd, buf, 0, len, 0);
       const raw = buf.toString('utf8');
       const strings = [];
       for (const line of raw.split(/\r?\n/)) {
         if (!line.trim()) continue;
-        try { collectStrings(JSON.parse(line), strings); }
-        catch(e) { strings.push(line); }
+        try { strings.push(...messageTextsFromTranscriptLine(JSON.parse(line))); }
+        catch(e) { /* 非 JSON 行不收集(见上方注释) */ }
       }
       return strings;
     } finally {
