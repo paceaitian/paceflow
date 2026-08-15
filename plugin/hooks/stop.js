@@ -20,6 +20,8 @@ const COUNTER_FILE = path.join(PACE_RUNTIME, 'stop-block-count');
 const warnings = [];
 const warningTypes = [];
 const softReminders = [];
+// backlog 类软提醒(如超期 finding):与 deferred CHG 语义分离,独立前缀、不参与 slice 截断
+const backlogReminders = [];
 const backgroundWorkReminders = [];
 
 const paceSignal = isPaceProject(cwd);
@@ -96,8 +98,8 @@ function describeBackgroundTask(task) {
   return parts.join(' ');
 }
 
-function emitAllowedStopReminders({ deferredReminders, backgroundReminders, backgroundTasks, t0 }) {
-  if (deferredReminders.length === 0 && backgroundReminders.length === 0) return false;
+function emitAllowedStopReminders({ deferredReminders, backgroundReminders, backlogReminders = [], backgroundTasks, t0 }) {
+  if (deferredReminders.length === 0 && backgroundReminders.length === 0 && backlogReminders.length === 0) return false;
   resetHardBlockRuntime();
   const parts = [];
   if (backgroundReminders.length > 0) {
@@ -112,6 +114,10 @@ function emitAllowedStopReminders({ deferredReminders, backgroundReminders, back
     const more = deferredReminders.length > shown.length ? `；另有 ${deferredReminders.length - shown.length} 个` : '';
     parts.push(`仍有 deferred CHG 可后续处理：${shown.join('；')}${more}`);
   }
+  // backlog 提醒独立段(CHG-20260814-03 审计 P3-1/P3-2):语义非 deferred CHG,且不参与 slice 截断
+  if (backlogReminders.length > 0) {
+    parts.push(backlogReminders.join('。'));
+  }
   const systemMessage = `PACEflow: ${parts.join('。')}。`;
   process.stdout.write(JSON.stringify({ systemMessage }) + '\n');
   const action = backgroundReminders.length > 0 ? 'SOFT_BACKGROUND_WORK_PASS' : 'SOFT_DEFERRED_PASS';
@@ -119,6 +125,7 @@ function emitAllowedStopReminders({ deferredReminders, backgroundReminders, back
     proj,
     deferred_count: deferredReminders.length,
     background_count: backgroundReminders.length,
+    backlog_count: backlogReminders.length,
     background_tasks: backgroundTasks.map(describeBackgroundTask).join('; '),
     changes: [...backgroundReminders, ...deferredReminders].map(r => (r.match(/^(CHG|HOTFIX)-\d{8}-\d{2}/) || [''])[0]).filter(Boolean).join(','),
     dur: Date.now() - t0,
@@ -355,7 +362,15 @@ if (paceSignal === 'artifact') {
           return days !== null && days >= 14;
         }).length
       : 0;
-    if (aged > 0) addWarning('user-action', `changes/findings/ 有 ${aged} 个 open finding 超过 14 天未流转，请询问用户采纳、否定或保持开放。`);
+    // CHG-20260814-03(用户方案):超期 finding 是 backlog 陈化提醒,blast radius 极低,
+    // 不与「未验证/未审计」等真流程门共用硬阻断通道——改走 softReminders,仅在本就放行时
+    // 以 systemMessage 显示,不再 exit 2。此前硬阻断 + 降级即重置计数器(T-424)在等待
+    // background agent 场景形成拦截乒乓(2026-08-14 实测 10+ 次)。
+    if (aged > 0) {
+      backlogReminders.push(`changes/findings/ 有 ${aged} 个 open finding 超过 14 天未流转（提醒，不阻断）；可让 AI 逐条给出采纳/否定建议后批量处置`);
+      // 有其他硬 warning 时提醒会被吞(设计意图),补日志留痕保可观测(审计 P3-3)
+      log(projectLogEntry('Stop', 'SOFT_AGED_FINDINGS', { proj, aged }));
+    }
   } catch(e) {}
 
 } else if (taskActive) {
@@ -451,7 +466,7 @@ if (warnings.length > 0) {
   } // 关闭 isTeammate else
 } else {
   // 检查全部通过，重置计数器 + 清除降级标记
-  if (emitAllowedStopReminders({ deferredReminders: softReminders, backgroundReminders: backgroundWorkReminders, backgroundTasks, t0 })) process.exit(0);
+  if (emitAllowedStopReminders({ deferredReminders: softReminders, backgroundReminders: backgroundWorkReminders, backlogReminders, backgroundTasks, t0 })) process.exit(0);
   resetHardBlockRuntime();
   log(projectLogEntry('Stop', 'PASS', { proj, dur: Date.now() - t0 }));
   process.exit(0);

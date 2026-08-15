@@ -6828,8 +6828,10 @@ test('14f3. Stop findings aging 识别带引号的 open status', () => {
     '',
   ].join('\n'), 'utf8');
   const r = runHook('stop.js', { cwd: dir });
-  assert.strictEqual(r.code, 2);
-  assert.ok(r.stderr.includes('open finding 超过 14 天'));
+  // CHG-20260814-03:超期 finding 从硬阻断改软提醒——识别逻辑(带引号 status)不变,出口从 exit 2 改 systemMessage
+  assert.strictEqual(r.code, 0);
+  const out = JSON.parse(r.stdout);
+  assert.ok(out.systemMessage.includes('open finding 超过 14 天'), '带引号 open status 仍应被识别并软提醒');
 });
 
 test('14g. 索引 [x] 但 status in-progress → inconsistent 阻止修复', () => {
@@ -7977,6 +7979,37 @@ test('23j. SAS-T1: transcript 兜底不再把 tool_result 文件内容误配为 
   assert.strictEqual(r.code, 0);
   const owner = JSON.parse(fs.readFileSync(ownerPath, 'utf8'));
   assert.strictEqual(owner.state, 'closing', 'tool_result 内容不得触发 owner close（误配回归）');
+});
+
+test('ST-AGED-1. 超期 open finding 不再阻断 Stop——放行并以 systemMessage 显示提醒（CHG-20260814-03）', () => {
+  const dir = makeV6Project('stop-aged-soft', {
+    withIndex: false,
+    detail: chgDetail({ status: 'archived', task: '[x]', approved: true, verified: true }),
+  });
+  const findingsDir = path.join(dir, 'changes', 'findings');
+  fs.mkdirSync(findingsDir, { recursive: true });
+  const oldDate = new Date(Date.now() - 15 * 86400e3).toISOString().slice(0, 10);
+  fs.writeFileSync(path.join(findingsDir, 'finding-old-backlog.md'),
+    `---\nstatus: open\ndate: ${oldDate}\nschema-version: "7.0"\n---\n# 旧 backlog finding\n`, 'utf8');
+  const r = runHook('stop.js', { cwd: dir, stdin: { session_id: 'sid-aged-soft' } });
+  assert.strictEqual(r.code, 0, `超期 finding 单独存在时 Stop 应放行,stderr=${r.stderr}`);
+  const out = JSON.parse(r.stdout);
+  assert.ok(out.systemMessage.includes('超过 14 天'), 'systemMessage 应含超期提醒');
+  assert.ok(out.systemMessage.includes('1 个'), '提醒应含数量');
+});
+
+test('ST-AGED-2. 超期 finding 与其他硬 warning 并存时硬门照常 exit 2 且超期不再列为阻断项', () => {
+  // detail:false → walkthrough 的 [[chg-20260504-01]] 指向不存在的详情文件 = 可靠的 repair 硬 warning
+  const dir = makeV6Project('stop-aged-with-hard', { withIndex: false, detail: false });
+  const findingsDir = path.join(dir, 'changes', 'findings');
+  fs.mkdirSync(findingsDir, { recursive: true });
+  const oldDate = new Date(Date.now() - 20 * 86400e3).toISOString().slice(0, 10);
+  fs.writeFileSync(path.join(findingsDir, 'finding-old-two.md'),
+    `---\nstatus: open\ndate: ${oldDate}\nschema-version: "7.0"\n---\n# 旧 finding\n`, 'utf8');
+  const r = runHook('stop.js', { cwd: dir, stdin: { session_id: 'sid-aged-hard' } });
+  assert.strictEqual(r.code, 2, '硬 warning 仍应阻断');
+  assert.ok(!r.stderr.includes('超过 14 天'), '超期 finding 不再出现在阻断清单');
+  assert.strictEqual(r.stdout.trim(), '', '硬阻断时不应输出软提醒 systemMessage（审计 P3-4 锁另一半契约）');
 });
 
 test('23k. SST-1: subagent-start logging-only——退出 0 无 stdout 且 OBSERVE 日志落盘', () => {
