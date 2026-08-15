@@ -923,22 +923,32 @@ test('SST-LAZY: inferCloseTarget 廉价 candidate 命中时不读 transcript（l
 test('ECX-MEMO: executionContextForCwd 进程内 memo——同 cwd 第二次调用零新增 git fork + 突变隔离（HOTFIX-20260815-01 codex P2-2）', () => {
   const { execFileSync } = require('child_process');
   const tdir = makeTmpDir('ecx-memo');
-  const cnt = path.join(tdir, 'git-calls.log');
-  // PATH 注入计数 git shim:每次被 fork 追加一行;子进程跑保证 memo 干净
-  fs.writeFileSync(path.join(tdir, 'git'), `#!/bin/sh\necho x >> "${cnt}"\necho fake-branch\n`, { mode: 0o755 });
+  // 跨平台:不用 PATH shim(Windows 不认 shebang、PATHEXT 找 .exe/.cmd,shim 从不被调——CI 实测假绿),
+  // 改在子进程用 Module._load 拦截 child_process.execFileSync 计数 git fork 并返回可控分支名。
   const code = [
-    `process.env.PATH = ${JSON.stringify(tdir)} + ':' + process.env.PATH;`,
-    `const fs = require('fs');`,
+    `const Module = require('module');`,
+    `const realLoad = Module._load;`,
+    `let gitCalls = 0;`,
+    `Module._load = function (request, parent, isMain) {`,
+    `  const mod = realLoad.apply(this, arguments);`,
+    `  if (request === 'child_process') {`,
+    `    return Object.assign({}, mod, { execFileSync: (file, args, opts) => {`,
+    `      if (file === 'git') { gitCalls++; return 'fake-branch\\n'; }`,
+    `      return mod.execFileSync(file, args, opts);`,
+    `    } });`,
+    `  }`,
+    `  return mod;`,
+    `};`,
     `const pu = require(${JSON.stringify(path.join(__dirname, '..', 'plugin', 'hooks', 'pace-utils', 'path-utils.js'))});`,
-    `const countCalls = () => { try { return fs.readFileSync(${JSON.stringify(cnt)}, 'utf8').trim().split('\\n').filter(Boolean).length; } catch(e) { return 0; } };`,
     `const a = pu.executionContextForCwd(${JSON.stringify(tdir)});`,
-    `const n1 = countCalls();`,
+    `const n1 = gitCalls;`,
     `a.branch = 'MUTATED';`,
     `const b = pu.executionContextForCwd(${JSON.stringify(tdir)});`,
-    `const n2 = countCalls();`,
-    `console.log(JSON.stringify({ n1, n2, secondBranch: b.branch }));`,
+    `const n2 = gitCalls;`,
+    `console.log(JSON.stringify({ n1, n2, firstBranch: a.branch, secondBranch: b.branch }));`,
   ].join('\n');
   const out = JSON.parse(execFileSync(process.execPath, ['-e', code], { encoding: 'utf8' }).trim());
+  assert.strictEqual(out.n1, 1, `首次调用应恰好 fork git 一次(实际 ${out.n1}),证明 spy 生效非假绿`);
   assert.strictEqual(out.n2, out.n1, `第二次调用不得新增 git fork(n1=${out.n1}, n2=${out.n2})`);
   assert.strictEqual(out.secondBranch, 'fake-branch', 'memo 返回浅拷贝——caller 突变不污染缓存');
 });
