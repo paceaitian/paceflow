@@ -8193,6 +8193,7 @@ test('UPS-1. UserPromptSubmit 有 running CHG → 注入一行含 CHG id 且 ≤
   assert.strictEqual(out.hookSpecificOutput.hookEventName, 'UserPromptSubmit');
   assert.ok(ctx.includes('CHG-20260504-01'), `注入应含活跃 CHG id:${ctx}`);
   assert.ok(ctx.includes('测试变更'), `注入应含人读标题(审计 P1-1 载荷断言):${ctx}`);
+  assert.ok(!/#change|#hotfix|\[tasks::/.test(ctx), `标题应剥净 #tag 与 dataview 尾巴(实拍 #hotfix 残留回归):${ctx}`);
   assert.ok(/任务 \d+\/\d+/.test(ctx), `注入应含任务进度:${ctx}`);
   assert.ok(ctx.length <= 300, `注入应 ≤300 chars,实际 ${ctx.length}`);
 });

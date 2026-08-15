@@ -23,7 +23,8 @@ const TITLE_BUDGET_CHARS = 120;
 
 // 索引行 rest 剥掉 dataview 尾巴(#change [tasks:: ...] 等),留人读标题
 function humanTitleFromRest(rest) {
-  return String(rest || '').split('#change')[0].replace(/\[[^\]]*::[^\]]*\]/g, '').trim();
+  // 切掉第一个 ` #tag`(#change / #hotfix / 未来任何 tag)起的全部尾巴,不枚举 tag 名;再兜底剥残留 dataview
+  return String(rest || '').replace(/\s+#[a-z][\w-]*\b[\s\S]*$/i, '').replace(/\[[^\]]*::[^\]]*\]/g, '').trim();
 }
 
 function isForeignOrSibling(disposition) {
