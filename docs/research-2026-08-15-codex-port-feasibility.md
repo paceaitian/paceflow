@@ -9,6 +9,19 @@
 
 **可以移植,且比预期容易得多——Codex 官方 hooks 系统与 Claude Code 高度同构并明确兼容 Claude 插件 hooks(自动设 `CLAUDE_PLUGIN_ROOT`)。两个确定性门(写码门 / Stop 门)加一个 ~40 行 apply_patch 适配层即可跑通(已实证);artifact-writer 子代理层是结构性障碍(派遣 prompt 加密不可读 + 子代理内 hooks 实测零触发),需改用不同机制;skill 层可移植但注入时机不同。**
 
+## 研究 agent 报告增量(已存档 `docs/research/codex-port/agent-report-*.md`,主 session 逐条对照)
+
+扩展面 agent(codex-ext-surface,独立 CODEX_HOME + 二进制 strings)补出四条决定性增量,修正/加强本文原判断:
+
+1. **Codex hook 系统是照 Claude Code 协议实现的**——二进制内嵌 schema 留有原话 "Claude requires `reason` when `decision` is `block`",`CLAUDE_PLUGIN_ROOT` / `CLAUDE_PLUGIN_DATA` 字面量在 hook 引擎字符串区;`.claude-plugin/plugin.json` / `.codex-plugin` / `.cursor-plugin` 三种 manifest 并列识别。**PACEflow 插件原样 `codex plugin add` 安装成功**(v7.2.32 正确读取,5 个 commands 自动转 skill,4 个 skill 零改被发现)。
+2. **原样安装后 hooks 事件全触发但 handler 全 Failed**——事件注册层 100% 兼容,差异在 handler 层三处机械改造:①handler **无 `args` 字段**(PACEflow 用 `command:"node"+args:[…]`,需合并为单 command 字符串;`${CLAUDE_PLUGIN_ROOT}` 原生支持不用改);②**stdout 必须 JSON**(SessionStart 纯文本输出在 Codex 判 Failed,需包 `hookSpecificOutput.additionalContext`;脚本本体手工喂 stdin 行为完全正常);③写码门 apply_patch 形态(与本文 E2/E4 一致)。**这修正了本文原「hooks.json 零改」判断——是「事件层零改 + handler 层三处机械转换」。**
+3. **PreToolUse deny 位于 Codex 审批链最外层**——PreToolUse →(需审批时)PermissionRequest → Guardian 自动审批 → 执行;PreToolUse deny 时 PermissionRequest 根本不触发,`never+danger-full-access` 与 `untrusted+workspace-write` 两极端配置各验一次均照拦。**Guardian(自动审批评审器)方向与 PACEflow 相反(放宽 vs 收紧),不冲 deny。** PermissionRequest 是白送的第二道门。
+4. **超时语义**:hook 超时被杀标 Failed 但会话照常继续(软失败,非阻断)——PACEflow 的 fail-closed 门在超时场景会静默失守,须给 node 冷启动+文件扫描留足 timeout。另:`features list` 的 `removed` 状态 ≠ 功能不可用(plugin_hooks/external_migration 标 removed 但实测生效),不可反推。
+
+其余与本文一手实测一致:SubagentStart/SubagentStop exec 模式零触发(agent 两种 matcher 两次独立实测)、spawn message 加密、无 per-agent 工具白名单、custom agent 为 TOML 且 developer_instructions 生效。agent 给出的替代设计与本文 §subagent 层「落盘时刻门」思路一致:PreToolUse 拦 apply_patch 时把目标路径∈artifact 目录 与 stdin 的 agent_type 交叉判断——但前提仍是子代理内 PreToolUse 可见,交互模式待验。
+
+企业风险点(agent 补出):`requirements.toml` 的 `allow_managed_hooks_only = true` 会屏蔽全部 user/project/plugin hook——受管企业环境 PACEflow 可能被整体禁用。
+
 ## 一手实测证据(决定性)
 
 | # | 实验 | 结果 |
@@ -26,10 +39,10 @@
 
 | PACEflow 依赖 | Codex 对应 | 状态 |
 |---|---|---|
-| hooks.json 三层结构(event → matcher → command handlers) | 完全同构,官方支持 `.codex-plugin/plugin.json` + `hooks/hooks.json` 默认发现;`${CLAUDE_PLUGIN_ROOT}` 兼容注入 | ✅ 零改 |
+| hooks.json 三层结构(event → matcher → command handlers) | 事件层完全同构,`.claude-plugin/plugin.json` 原样可装,`${CLAUDE_PLUGIN_ROOT}` 原生支持;**但 handler 无 `args` 字段**(PACEflow 13 条目全用 command+args)| ⚠️ 机械改:合并为单 command 字符串 |
 | PreToolUse deny(`hookSpecificOutput.permissionDecision: "deny"`) | 同形态支持,另支持 exit 2 + stderr | ✅ 零改 |
 | Stop 阻止(exit 2 + stderr) | 同语义(Codex 把 reason 作为新 continuation prompt) | ✅ 零改 |
-| SessionStart 注入(stdout 纯文本 / additionalContext) | 同构;`source` 值域 startup/resume/clear/compact 一致;`additionalContextLimit` 默认 ~2500 tokens(比 Claude 10K chars 严,需调高或拆分) | ⚠️ 预算调整 |
+| SessionStart 注入(stdout 纯文本 / additionalContext) | `source` 值域一致;**stdout 必须 JSON**(PACEflow 纯文本输出在 Codex 判 Failed);`additionalContextLimit` 默认 ~2500 tokens 可调(spill 到磁盘留预览,比 Claude 硬截断友好) | ⚠️ 包 JSON + 预算调整 |
 | UserPromptSubmit additionalContext | 同构 | ✅ 零改 |
 | SubagentStart/SubagentStop | 事件存在但 **exec 模式实测零触发**(E5) | ❌ 待交互模式复测 |
 | PostToolUseFailure / StopFailure / Notification | 不存在 | ❌ 三个 logging/提示 hook 退化(非核心) |
