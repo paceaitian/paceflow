@@ -196,7 +196,7 @@ Helper 成功返回 exit code 0；业务校验失败返回 exit code 2 并在 st
 
 REVIEWED 门是 `stop.js` 的 Stop hook 门、不是 PreToolUse 门，因此不进 §5.1 的 PreToolUse 档位表。它在 teammate 模式跟随 `stop.js` 现有的「teammate 全门 exit 0」放行，与 verify 门同（未审计提醒与未验证提醒同属一组 warning，teammate 下一并软化）。
 
-`stop.js` 的后台任务放行：Claude Code v2.1.145+ 在 Stop 输入提供 `background_tasks` 时，PACEflow 把「running CHG 仍有未完成 T-NNN，但后台 Workflow/subagent/team/shell 任务仍在运行」的场景视为主 session 暂停等待后台结果，放行 Stop 并显示可见提醒；结构损坏、未验证、待归档仍照常阻断。与 README「CHG 生命周期与 Deferred」一致，避免读本节形成「有未完成任务一律阻断」的错误心智模型。
+`stop.js` 的后台任务放行：Claude Code v2.1.145+ 在 Stop 输入提供 `background_tasks` 时，PACEflow 把「running CHG 仍有未完成 T-NNN，但后台 Workflow/subagent/team/shell 任务仍在运行」的场景视为主 session 暂停等待后台结果，放行 Stop 并显示可见提醒；结构损坏、未验证、待归档仍照常阻断。此设计避免形成「有未完成任务一律阻断」的错误心智模型。
 
 ## 5.1 PreToolUse 拒绝档位与 teammate 降级
 
