@@ -278,6 +278,8 @@ change-link: [[chg-yyyymmdd-nn]]   （可选，与 accepted 搭配表示由该�
 append: <可选，原样追加到详情正文末尾的 Markdown>
 ```
 
+> **多条一次 batch**：要一次流转 N 条 finding（如批量 won't-fix 关闭），用共享头 `finding-update-batch-total: N` + N 个 `--- FINDING i/N ---` 块（每块必含 target、同批互异，status/change-link/append 至少其一），省去逐条派遣的重复上下文重载。详见 `agent-references/instructions/update-finding.md`「Batch 模式」。
+
 重排 findings.md / corrections.md 活跃区索引（按 date 降序，新→旧）：
 
 ```text

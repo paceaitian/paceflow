@@ -243,6 +243,21 @@ function promptTemplateForOperation({ prompt = '', artDir = '', operation = '', 
     ].join('\n');
   }
 
+  if (op === 'update-finding-batch') {
+    return [
+      ...lines,
+      'operation: update-finding',
+      'finding-update-batch-total: <N，必须等于下面 FINDING 块数>',
+      '--- FINDING 1/N ---',
+      'target: FINDING-YYYY-MM-DD-slug（每块必填，同批互异）',
+      'status: open | investigating | accepted | rejected | merged | blocked（status/change-link/append 至少其一）',
+      'append: <可选，追加到该 finding 详情正文末尾>',
+      '--- FINDING 2/N ---',
+      'target: <第 2 个 FINDING-id>',
+      'status: <...>',
+    ].join('\n');
+  }
+
   if (op === 'update-index') {
     return [
       ...lines,
@@ -360,6 +375,20 @@ function parseFindingBatchBlocks(prompt) {
     seq: b.seq,
     markerTotal: b.markerTotal,
     title: blockFieldValue(b.body, 'title'),
+  }));
+  return { isBatch: raw.length > 0, blocks };
+}
+
+// 解析 batch update-finding 的 `--- FINDING i/N ---` 分块(CHG-20260814-04,复刻 record-finding
+// batch 模式,复用同一 FINDING 块标签与 splitLabeledBlocks)。每块取 target(必填、同批互异)与
+// payload 有无(status / change-link / append 至少其一);字段值合法性仍由 agent 第三层校验。
+function parseFindingUpdateBatchBlocks(prompt) {
+  const raw = splitLabeledBlocks(String(prompt || ''), 'FINDING');
+  const blocks = raw.map((b) => ({
+    seq: b.seq,
+    markerTotal: b.markerTotal,
+    target: blockFieldValue(b.body, 'target'),
+    hasPayload: ['status', 'change-link', 'append', 'merged-into'].some((f) => blockFieldValue(b.body, f).trim() !== ''),
   }));
   return { isBatch: raw.length > 0, blocks };
 }
@@ -804,14 +833,54 @@ function agentLifecyclePromptDenyReason(prompt, artDir = '') {
     }
   }
 
-  if (operation === 'update-finding' && !promptHasNonEmptyField(text, 'target')) {
-    return [
-      '派 artifact-writer 执行 update-finding 时缺少必填字段：target（FINDING-id）。',
-      FORMAT_SNIPPETS.skillRef,
-      'update-finding 更新 finding 状态/链接：target 必须是 finding-id（解析到 changes/findings/<slug>.md）。',
-      '请重派同一个 agent，并使用完整 prompt 顶部模板：',
-      promptTemplateForOperation({ prompt, artDir, operation: 'update-finding' })
-    ].join('\n');
+  if (operation === 'update-finding') {
+    // batch 检测必须在单 target 检查之前:batch prompt 无顶层 target,落入单条门会误拦(CHG-20260814-04)
+    const batch = parseFindingUpdateBatchBlocks(text);
+    const totalRaw = promptFieldValue(text, 'finding-update-batch-total');
+    const declaredTotal = /^\d+$/.test(totalRaw) ? Number(totalRaw) : null;
+    const looksBatch = batch.isBatch || (declaredTotal !== null && declaredTotal > 1);
+    if (looksBatch) {
+      const tpl = promptTemplateForOperation({ prompt, artDir, operation: 'update-finding-batch' });
+      const deny = (msg) => [msg, FORMAT_SNIPPETS.skillRef, '请重派同一个 agent，使用 batch update-finding 多块模板：', tpl].join('\n');
+      if (!batch.isBatch) {
+        return deny('batch update-finding（finding-update-batch-total>1）必须用 `--- FINDING i/N ---` 分隔每个 finding 块，但 prompt 未检测到任何块。');
+      }
+      if (declaredTotal === null) {
+        return deny('batch update-finding 缺少 finding-update-batch-total（应等于 batch 块数）。');
+      }
+      if (batch.blocks.length !== declaredTotal) {
+        return deny(`batch update-finding 块数（${batch.blocks.length}）与 finding-update-batch-total（${declaredTotal}）不一致。`);
+      }
+      const errs = [];
+      const seenTargets = new Set();
+      batch.blocks.forEach((b, idx) => {
+        const where = `第 ${idx + 1} 块（--- FINDING ${b.seq}/${b.markerTotal} ---）`;
+        if (b.markerTotal !== declaredTotal) errs.push(`${where} 标记总数 ${b.markerTotal} 与 finding-update-batch-total ${declaredTotal} 不符`);
+        if (b.seq !== idx + 1) errs.push(`${where} 序号应为 ${idx + 1}`);
+        if (!b.target) {
+          errs.push(`${where} 缺 target（FINDING-id）`);
+        } else {
+          // 同批重复 target = 同一 finding 被多块并发改写,后块覆盖前块的状态流转——确定性拦截
+          const key = b.target.trim().toLowerCase();
+          if (seenTargets.has(key)) errs.push(`${where} target 与其他块重复（同一 finding 不得在同批多次流转）：${b.target}`);
+          else seenTargets.add(key);
+        }
+        if (!b.hasPayload) errs.push(`${where} 缺操作载荷：status / change-link / append / merged-into 至少其一（值须与冒号同行；多行 append 走单条 dispatch）`);
+      });
+      if (errs.length > 0) {
+        return [`batch update-finding 块校验失败：`, ...errs.map((e) => `- ${e}`), FORMAT_SNIPPETS.skillRef, '请重派同一个 agent，使用 batch update-finding 多块模板：', tpl].join('\n');
+      }
+      return '';
+    }
+    if (!promptHasNonEmptyField(text, 'target')) {
+      return [
+        '派 artifact-writer 执行 update-finding 时缺少必填字段：target（FINDING-id）。',
+        FORMAT_SNIPPETS.skillRef,
+        'update-finding 更新 finding 状态/链接：target 必须是 finding-id（解析到 changes/findings/<slug>.md）。',
+        '请重派同一个 agent，并使用完整 prompt 顶部模板：',
+        promptTemplateForOperation({ prompt, artDir, operation: 'update-finding' })
+      ].join('\n');
+    }
   }
 
   return '';

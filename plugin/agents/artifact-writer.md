@@ -407,7 +407,7 @@ action: reorder
 ```markdown
 ## artifact-writer 报告
 
-**操作**：[create-chg | update-chg | archive-chg | close-chg | record-finding | record-correction]
+**操作**：[create-chg | update-chg | archive-chg | close-chg | record-finding | record-correction | update-finding | update-index]
 **Target**：[CHG-XXX 或 finding-id 或 correction-id]
 **状态**：SUCCESS
 

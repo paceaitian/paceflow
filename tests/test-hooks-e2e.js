@@ -4940,6 +4940,144 @@ test('9hc-ui4. update-index target 行带尾随说明 → 放行（firstToken �
   assert.ok(!r.stdout.includes('"deny"'), 'update-index target/action 带尾随说明不应误伤 DENY：' + r.stdout);
 });
 
+// BFU 系列:update-finding batch(CHG-20260814-04,复刻 record-finding batch 模式)
+function bfuDispatch(dir, promptLines) {
+  return runHook('pre-tool-use.js', {
+    cwd: dir,
+    stdin: {
+      tool_name: 'Agent',
+      tool_input: {
+        subagent_type: 'paceflow:artifact-writer',
+        description: 'batch update finding',
+        prompt: [`artifact_dir: ${dir.replace(/\\/g, '/')}/`, ...promptLines].join('\n'),
+      },
+    },
+  });
+}
+
+test('BFU-1. batch update-finding 合法两块(target 互异+各有 status)→ 放行', () => {
+  const dir = makeV6Project('bfu-valid');
+  const r = bfuDispatch(dir, [
+    'operation: update-finding',
+    'finding-update-batch-total: 2',
+    '--- FINDING 1/2 ---',
+    'target: finding-2026-01-01-aaa',
+    'status: rejected',
+    'rejection-reason: 一次性脚本低可达关闭',
+    '--- FINDING 2/2 ---',
+    'target: finding-2026-01-02-bbb',
+    'status: accepted',
+    'change-link: [[chg-20260504-01]]',
+  ]);
+  assert.strictEqual(r.code, 0);
+  assert.ok(!r.stdout.includes('"deny"'), `合法 batch 应放行:${r.stdout}`);
+});
+
+test('BFU-2. batch 块存在但缺 finding-update-batch-total → DENY', () => {
+  const dir = makeV6Project('bfu-no-total');
+  const r = bfuDispatch(dir, [
+    'operation: update-finding',
+    '--- FINDING 1/2 ---',
+    'target: finding-2026-01-01-aaa',
+    'status: rejected',
+    '--- FINDING 2/2 ---',
+    'target: finding-2026-01-02-bbb',
+    'status: accepted',
+  ]);
+  assert.ok(r.stdout.includes('"deny"') && r.stdout.includes('finding-update-batch-total'), r.stdout);
+});
+
+test('BFU-3. 块数与 finding-update-batch-total 不符 → DENY', () => {
+  const dir = makeV6Project('bfu-count-mismatch');
+  const r = bfuDispatch(dir, [
+    'operation: update-finding',
+    'finding-update-batch-total: 3',
+    '--- FINDING 1/3 ---',
+    'target: finding-2026-01-01-aaa',
+    'status: rejected',
+    '--- FINDING 2/3 ---',
+    'target: finding-2026-01-02-bbb',
+    'status: accepted',
+  ]);
+  assert.ok(r.stdout.includes('"deny"') && r.stdout.includes('不一致'), r.stdout);
+});
+
+test('BFU-4. 同批重复 target → DENY(互异校验)', () => {
+  const dir = makeV6Project('bfu-dup-target');
+  const r = bfuDispatch(dir, [
+    'operation: update-finding',
+    'finding-update-batch-total: 2',
+    '--- FINDING 1/2 ---',
+    'target: finding-2026-01-01-aaa',
+    'status: rejected',
+    '--- FINDING 2/2 ---',
+    'target: finding-2026-01-01-aaa',
+    'status: accepted',
+  ]);
+  assert.ok(r.stdout.includes('"deny"') && r.stdout.includes('重复'), r.stdout);
+});
+
+test('BFU-5. 某块缺 target → DENY', () => {
+  const dir = makeV6Project('bfu-block-no-target');
+  const r = bfuDispatch(dir, [
+    'operation: update-finding',
+    'finding-update-batch-total: 2',
+    '--- FINDING 1/2 ---',
+    'target: finding-2026-01-01-aaa',
+    'status: rejected',
+    '--- FINDING 2/2 ---',
+    'status: accepted',
+  ]);
+  assert.ok(r.stdout.includes('"deny"') && r.stdout.includes('target'), r.stdout);
+});
+
+test('BFU-6. 某块无 status/change-link/append 任一 → DENY', () => {
+  const dir = makeV6Project('bfu-block-no-payload');
+  const r = bfuDispatch(dir, [
+    'operation: update-finding',
+    'finding-update-batch-total: 2',
+    '--- FINDING 1/2 ---',
+    'target: finding-2026-01-01-aaa',
+    'status: rejected',
+    '--- FINDING 2/2 ---',
+    'target: finding-2026-01-02-bbb',
+  ]);
+  assert.ok(r.stdout.includes('"deny"') && (r.stdout.includes('status') || r.stdout.includes('至少')), r.stdout);
+});
+
+test('BFU-7. batch deny 文案含 update-finding-batch 模板骨架(模板分支覆盖,审计 P3-6)', () => {
+  const dir = makeV6Project('bfu-template-skeleton');
+  const r = bfuDispatch(dir, [
+    'operation: update-finding',
+    '--- FINDING 1/2 ---',
+    'target: finding-2026-01-01-aaa',
+    'status: rejected',
+    '--- FINDING 2/2 ---',
+    'target: finding-2026-01-02-bbb',
+    'status: accepted',
+  ]);
+  assert.ok(r.stdout.includes('"deny"'), r.stdout);
+  assert.ok(r.stdout.includes('finding-update-batch-total: <N'), 'deny 应带 batch 模板骨架(模板分支未回落默认)');
+  assert.ok(r.stdout.includes('--- FINDING 1/N ---'), '模板应含块分隔示例');
+});
+
+test('BFU-8. 序号乱序与 markerTotal 不符 → DENY(两条新校验覆盖,审计 P3-6)', () => {
+  const dir = makeV6Project('bfu-seq-marker');
+  const r = bfuDispatch(dir, [
+    'operation: update-finding',
+    'finding-update-batch-total: 2',
+    '--- FINDING 2/2 ---',
+    'target: finding-2026-01-01-aaa',
+    'status: rejected',
+    '--- FINDING 1/3 ---',
+    'target: finding-2026-01-02-bbb',
+    'status: accepted',
+  ]);
+  assert.ok(r.stdout.includes('"deny"'), r.stdout);
+  assert.ok(r.stdout.includes('序号应为'), '乱序应被点名');
+  assert.ok(r.stdout.includes('标记总数'), 'markerTotal 不符应被点名');
+});
+
 test('9hc-uf1. update-finding 缺 target → DENY 要求 target FINDING-id', () => {
   const dir = makeV6Project('agent-update-finding-missing-target');
   const r = runHook('pre-tool-use.js', {
