@@ -449,8 +449,16 @@ function gitBranchName(cwd) {
   }
 }
 
+// HOTFIX-20260815-01(codex P2-2):进程内 per-cwd memo——changeOwnerStatus 每 owner 各调一次
+// 本函数(内含 git rev-parse fork,timeout 1s),UserPromptSubmit 等每轮 hook 在多 owner 场景
+// 延迟按 N 线性放大(实测 4 owner ≈ N×Git latency)。hook 进程生命周期短(单次调用),进程内
+// memo 无 mid-session checkout 失效风险;返回浅拷贝防 caller 突变污染缓存。
+const _execCtxMemo = new Map();
+
 function executionContextForCwd(cwd) {
   const resolved = path.resolve(cwd || process.cwd());
+  const cached = _execCtxMemo.get(resolved);
+  if (cached) return { ...cached };
   const rootInfo = resolveEffectiveProjectRoot(resolved);
   const stateDir = rootInfo.projectRoot;
   const wtHost = worktreeBaseDir(resolved) || gitWorktreeHostDir(resolved);
@@ -458,7 +466,7 @@ function executionContextForCwd(cwd) {
   const isWorktree = !!wtHost && normalizePath(stateDir) !== normalizePath(resolved);
   const worktree = isWorktree ? path.basename(wtCheckout || resolved) : 'main';
   const branch = gitBranchName(resolved) || worktree || 'unknown';
-  return {
+  const built = {
     worktree,
     branch,
     cwd: resolved,
@@ -471,6 +479,8 @@ function executionContextForCwd(cwd) {
     inheritedProjectRoot: !!rootInfo.inherited && !isWorktree,
     text: `[worktree:: ${worktree}] [branch:: ${branch}]`,
   };
+  _execCtxMemo.set(resolved, built);
+  return { ...built };
 }
 
 module.exports = {

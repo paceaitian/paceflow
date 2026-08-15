@@ -29,7 +29,7 @@ append: <要追加到详情正文末尾的 Markdown>   （可选，原样追加�
 - `merged-into`（可选，finding wikilink；status=merged 时写索引行 `[merged-into:: [[...]]]`）
 - `append`（可选，Markdown 原文，追加到详情正文末尾）：opaque payload，逐字写入，不摘要 / 截断 / 重排；唯一允许的归一化是换行风格
 
-至少提供 `status` / `change-link` / `append` 之一，否则 `format-violation`（无可更新内容）。
+至少提供 `status` / `change-link` / `append` / `merged-into` 之一，否则 `format-violation`（无可更新内容）。
 
 ## 操作步骤
 
@@ -47,7 +47,7 @@ append: <要追加到详情正文末尾的 Markdown>   （可选，原样追加�
 
 ## Batch 模式（一次 dispatch 流转 N 条 finding）
 
-一次 dispatch 更新多条 finding（仪式降本，复刻 record-finding batch 先例——批量 won't-fix / 批量回链场景省去逐条派遣的重复上下文重载）。格式：共享头部 `finding-update-batch-total: N` + N 个 `--- FINDING i/N ---` 块，每块必含 `target`（同批互异，hook 前置校验），且 `status` / `change-link` / `append` 至少其一。
+一次 dispatch 更新多条 finding（仪式降本，复刻 record-finding batch 先例——批量 won't-fix / 批量回链场景省去逐条派遣的重复上下文重载）。格式：共享头部 `finding-update-batch-total: N` + N 个 `--- FINDING i/N ---` 块，每块必含 `target`（同批互异，hook 前置校验），且 `status` / `change-link` / `append` / `merged-into` 至少其一。
 
 ```text
 artifact_dir: <hook 解析出的 artifact 目录>

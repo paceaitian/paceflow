@@ -2,8 +2,8 @@
 
 > **⚠️ 可信度警告(2026-08-14 主 session 甄别)**:本文由 claude-code-guide 研究 agent 生成,**版本-事实绑定未经逐条核验,多处与一手探针实测矛盾,不得作为事实来源引用**。已证实的问题:①「PreToolUse 不触发 Workflow/Agent/Monitor」与探针实拍直接矛盾(实测三者均触发);②「Monitor v2.1.228 FSW-1 fail-closed」把 PACEflow 自身 v7.2.28 changelog 术语误当宿主变更(证据污染);③ auto-commit/push 条目在该 agent 前后两份报告中版本号漂移(v2.1.198 vs v2.1.221)。**权威评估以 `docs/claude-code-2.1.126-2.1.232-paceflow-evaluation.md`(含探针一手实测)为准**;本文仅作研究过程存档与线索地图。
 
-**基准时间**：v2.1.126 (2026-05-02) → v2.1.232 (2026-08-13)  
-**关键盲区**：v2.1.159 (2026-07-03) → v2.1.232  
+**基准时间**：v2.1.126 (2026-05-02) → v2.1.232 (2026-08-13)
+**关键盲区**：v2.1.159 (2026-07-03) → v2.1.232
 **审计日期**：2026-08-14
 
 ---
@@ -348,28 +348,27 @@
 
 ### 已验证的稳定性
 
-✅ Hook 10K 字符限制仍然有效（MEMORY 确认）  
-✅ PreToolUse/PostToolUse 触发范围稳定（无回归）  
-✅ Subagent 并发管理（20 默认，可配置）  
-✅ 后台会话权限继承（自动化，无手工干预）  
+✅ Hook 10K 字符限制仍然有效（MEMORY 确认）
+✅ PreToolUse/PostToolUse 触发范围稳定（无回归）
+✅ Subagent 并发管理（20 默认，可配置）
+✅ 后台会话权限继承（自动化，无手工干预）
 ✅ Worktree 隔离加强（v2.1.222 修复全覆盖）
 
 ### 已修复的安全问题
 
-✅ PowerShell 符号链接绕过（v2.1.232）  
-✅ Bash zsh 条件式隐藏命令（v2.1.221）  
-✅ 后台 Task 的 PreToolUse 绕过（v2.1.222）  
+✅ PowerShell 符号链接绕过（v2.1.232）
+✅ Bash zsh 条件式隐藏命令（v2.1.221）
+✅ 后台 Task 的 PreToolUse 绕过（v2.1.222）
 ✅ Git 仓库信任隔离（v2.1.232）
 
 ### 仍需关注的盲点
 
-⚠️ Skill 列表压缩后不重新注入（无修复计划）— **规避：使用 fork 或明确重导入**  
-⚠️ CronCreate/ScheduleWakeup 精确实现细节（未记录）— **需实测**  
-⚠️ ScheduleWakeup 是否触发 Stop Hook（无文档）— **需实测**  
+⚠️ Skill 列表压缩后不重新注入（无修复计划）— **规避：使用 fork 或明确重导入**
+⚠️ CronCreate/ScheduleWakeup 精确实现细节（未记录）— **需实测**
+⚠️ ScheduleWakeup 是否触发 Stop Hook（无文档）— **需实测**
 ⚠️ Stop Hook 10K 字符输出在并发后台任务中的行为（无明确规范）— **需实测**
 
 ---
 
-**报告完成日期**：2026-08-14 09:58:39  
+**报告完成日期**：2026-08-14 09:58:39
 **审计工具**：Claude Code 官方 CHANGELOG + 文档 + MEMORY
-

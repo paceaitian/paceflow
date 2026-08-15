@@ -125,6 +125,21 @@ function inferCloseTarget(stdin) {
 }
 
 function closeOwnerIfArchived(stdin, status, t0) {
+  // HOTFIX-20260815-01(codex P2-1):SubagentStop 在 v2.1.232 起每轮 idle 触发(非仅完成),
+  // resume 场景的中间轮没有终态报告——只有 lastMessage 报出 SUCCESS 终态才允许关闭 owner,
+  // 否则 agent 仍在继续工作时 owner 被提前关闭,fresh writer 可经 owner 门并发接手。
+  // 非终态直接 skip(也省去 transcript 读取);漏关由 30min TTL sweep 自愈,方向 fail-safe。
+  if (status !== 'SUCCESS') {
+    log(logEntry('SubagentStop', 'CHANGE_OWNER_CLOSE_SKIP', {
+      proj,
+      operation: '-',
+      target: '-',
+      reason: 'non-terminal-status',
+      status: status || '-',
+      dur: Date.now() - t0,
+    }));
+    return;
+  }
   const inferred = inferCloseTarget(stdin);
   if (!inferred.operation || !inferred.target) {
     log(logEntry('SubagentStop', 'CHANGE_OWNER_CLOSE_SKIP', {

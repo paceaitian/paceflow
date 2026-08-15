@@ -169,12 +169,14 @@ artifact-writer 逐块建 N 个 `changes/<id>.md`（各写 `change-set` + `chang
 | Hook | 职责 |
 |------|---------|
 | `session-start.js` | 创建/注入索引模板，输出活跃 CHG 摘要 |
+| `subagent-start.js` | logging-only：记录 subagent 派遣时的 agent_id/agent_type 做生命周期对账 |
+| `notification.js` | logging-only：记录宿主 Notification 事件字段形态收集触发分布（观察期） |
+| `user-prompt-submit.js` | 每轮用户输入时，本 session 有 running/closing-required CHG 则注入一行摘要（第二防遗忘通道；pause/无命中零输出） |
 | `pre-tool-use.js` | 写代码、运行 Bash/PowerShell/Monitor 命令或派 artifact-writer 前，检查活跃 CHG、详情文件、APPROVED、可执行状态，并阻止直接写 artifact / `.pace` 控制面 |
 | `post-tool-use.js` | schema/wikilink/直接 C-V 写入/correction knowledge 提醒；verified 未 reviewed 时 `review-missing` 软提醒 |
 | `post-tool-use-failure.js` | 写入/验证工具失败后提醒不要误判完成 |
 | `subagent-stop.js` | 观察 `artifact-writer` 报告标题/状态并记录 transcript |
 | `stop.js` | 阻止未完成、未 verified、verified 未归档、索引不一致；阻止「completed+verified 但未 reviewed」（未审计）退出；CC v2.1.145+ 提供 `background_tasks` 时后台任务运行场景放行（详见下方） |
-| `task-list-sync.js` | legacy 兼容 observer；当前插件不注册任务面板 hook，PACE 权威仍是 `changes/<id>.md` |
 | `pre-compact.js` | native plan 兜底检测（落 current-native-plan 供 SessionStart 桥接消费）；快照机制已退役 |
 | `stop-failure.js` | API 错误中断日志 |
 | `session-end.js` | session 正常结束时把本 session 持有的 CHG owner 降级 detached + 清除 session 级 pause 标志 |

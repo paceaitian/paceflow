@@ -183,11 +183,11 @@ PreToolUse 放行条件：活跃 CHG 在 `task.md` 存在，详情文件存在�
 
 方案根本性错误时：将当前任务标 `[!]`，停止写代码，重新说明偏差并回到 A/C；更新方案和重新批准也必须通过 artifact writer。
 
-### resume-per-CHG 编排（可选降本，仅限不写状态机标记的 op）
+### resume-per-CHG 编排（可选降本，显式低风险白名单）
 
-连续执行同一个 CHG 时，可复用同一个 artifact-writer 省掉 fresh spawn 的规范重载。判据是**该 op 写的东西会不会被其他确定性门当判据消费**：
+连续执行同一个 CHG 时，可复用同一个 artifact-writer 省掉 fresh spawn 的规范重载。白名单是**显式枚举的低风险 op**，不是"无副作用"——`update-status` 会真实改变任务 checkbox / frontmatter status / 根索引，这些状态被写码门与 Stop 消费；将其留在白名单是已接受的 LLM-soft 权衡（改错可逆、无伪造 V/R 标记路径），**扩大白名单前必须重新评估,不得以"只写记录"为由**：
 
-- **可 resume**（`SendMessage(to: <agentId>)`）：`update-status`、`append`（work-record / implementation）——只写进度与记录。resume 会跳过 update-status 自己的派遣门（`[!]` 必带 status-reason、不得与 verify 串派），但它们保护的是记录完整性、agent 第三层有对应自校验，影响止于本 CHG 的记录质量。
+- **可 resume**（`SendMessage(to: <agentId>)`）：`update-status`、`append`（work-record / implementation）。resume 会跳过 update-status 自己的派遣门（`[!]` 必带 status-reason、不得与 verify 串派），agent 第三层有对应自校验兜底。
 - **必须 fresh spawn**：`create-chg`（reservation 取编号）、`approve` / `approve-and-start` / `verify` / `review` / `close-chg`——写 APPROVED / VERIFIED / REVIEWED 与归档态，被写码门、Stop 门和 V→R 偏序门消费；且 V→R 偏序只实现在 hook 侧、agent 契约无对应自校验，resume 路径零兜底。
 
 `SendMessage` 不在 PACEflow 任何 PreToolUse matcher 内（`hooks.json`），宿主 v2.1.232 实测亦不为其触发——resume 跳过的不止字段门，还有 target 必填与 change-owner 归属校验。agentId 不可用（新 session / compact / agent 退出）或 SendMessage 失败 → 回退 fresh spawn。

@@ -920,6 +920,29 @@ test('SST-LAZY: inferCloseTarget 廉价 candidate 命中时不读 transcript（l
   }
 });
 
+test('ECX-MEMO: executionContextForCwd 进程内 memo——同 cwd 第二次调用零新增 git fork + 突变隔离（HOTFIX-20260815-01 codex P2-2）', () => {
+  const { execFileSync } = require('child_process');
+  const tdir = makeTmpDir('ecx-memo');
+  const cnt = path.join(tdir, 'git-calls.log');
+  // PATH 注入计数 git shim:每次被 fork 追加一行;子进程跑保证 memo 干净
+  fs.writeFileSync(path.join(tdir, 'git'), `#!/bin/sh\necho x >> "${cnt}"\necho fake-branch\n`, { mode: 0o755 });
+  const code = [
+    `process.env.PATH = ${JSON.stringify(tdir)} + ':' + process.env.PATH;`,
+    `const fs = require('fs');`,
+    `const pu = require(${JSON.stringify(path.join(__dirname, '..', 'plugin', 'hooks', 'pace-utils', 'path-utils.js'))});`,
+    `const countCalls = () => { try { return fs.readFileSync(${JSON.stringify(cnt)}, 'utf8').trim().split('\\n').filter(Boolean).length; } catch(e) { return 0; } };`,
+    `const a = pu.executionContextForCwd(${JSON.stringify(tdir)});`,
+    `const n1 = countCalls();`,
+    `a.branch = 'MUTATED';`,
+    `const b = pu.executionContextForCwd(${JSON.stringify(tdir)});`,
+    `const n2 = countCalls();`,
+    `console.log(JSON.stringify({ n1, n2, secondBranch: b.branch }));`,
+  ].join('\n');
+  const out = JSON.parse(execFileSync(process.execPath, ['-e', code], { encoding: 'utf8' }).trim());
+  assert.strictEqual(out.n2, out.n1, `第二次调用不得新增 git fork(n1=${out.n1}, n2=${out.n2})`);
+  assert.strictEqual(out.secondBranch, 'fake-branch', 'memo 返回浅拷贝——caller 突变不污染缓存');
+});
+
 test('SST-LAZY-FALLBACK: transcript 兜底仅提取 user/assistant 消息文本——裸对象/tool_result 不再入选（CHG-20260814-02 收窄）', () => {
   const ict = subagentStop.inferCloseTarget;
   const tdir = makeTmpDir('sst-lazy-fb');

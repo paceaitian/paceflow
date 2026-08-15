@@ -120,7 +120,10 @@ function emitAllowedStopReminders({ deferredReminders, backgroundReminders, back
   }
   const systemMessage = `PACEflow: ${parts.join('。')}。`;
   process.stdout.write(JSON.stringify({ systemMessage }) + '\n');
-  const action = backgroundReminders.length > 0 ? 'SOFT_BACKGROUND_WORK_PASS' : 'SOFT_DEFERRED_PASS';
+  // HOTFIX-20260815-01(codex P3-4):纯 backlog 放行单列 action,不再误记 SOFT_DEFERRED_PASS 污染观测
+  const action = backgroundReminders.length > 0
+    ? 'SOFT_BACKGROUND_WORK_PASS'
+    : (deferredReminders.length > 0 ? 'SOFT_DEFERRED_PASS' : 'SOFT_BACKLOG_PASS');
   log(projectLogEntry('Stop', action, {
     proj,
     deferred_count: deferredReminders.length,

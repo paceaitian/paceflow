@@ -189,11 +189,11 @@ brainstorming → writing-plans → pace-bridge（plan 转 CHG）→ auto-APPROV
 | **SessionStart** | 会话开始 / Compact 后 | 注入索引活跃区 + 活跃 CHG 摘要 |
 | **SubagentStart** | subagent 派遣时 | 仅记录 agent_id/agent_type 做生命周期对账（不阻断不注入） |
 | **Notification** | 宿主通知事件 | 仅记录事件字段形态收集触发分布（观察期，不阻断不注入） |
-| **UserPromptSubmit** | 每轮用户输入时 | 有 running CHG 时注入一行摘要（≤300 字符，第二防遗忘通道；无 running 零输出） |
+| **UserPromptSubmit** | 每轮用户输入时 | 本 session 有 running / closing-required CHG 时注入一行摘要（≤300 字符，第二防遗忘通道；pause / 无命中零输出） |
 | **PreToolUse:Write/Edit/MultiEdit/Bash/PowerShell/Monitor/Agent** | AI 写代码、运行命令或派 artifact-writer 前 | 无活跃 CHG / 无审批 / 状态不一致 / 直接写 artifact 或 `.pace` 控制面 → deny |
 | **PostToolUse** | AI 写代码后 | schema/wikilink/归档/correction 提醒 |
 | **PostToolUseFailure** | 写入/验证工具失败后 | 提醒不要把失败工具调用视为完成 |
-| **SubagentStop** | `artifact-writer` 结束后 | 观察报告标题/状态并记录 transcript |
+| **SubagentStop** | subagent 每轮停止时（宿主 v2.1.232 起含中间轮 idle） | 识别 `artifact-writer` 后观察报告/记录 transcript；仅终态 SUCCESS 报告才关闭 CHG owner |
 | **Stop** | AI 想结束会话 | 未完成 / 未验证 / 未审计 / 未归档 → exit 2 阻止退出（共用计数器连阻 3 次降级、不死锁）；已验证未审计要求先跑 R 审计 |
 | **PreCompact** | Compact 前 | native plan 兜底检测（快照机制已退役）|
 | **StopFailure** | API 错误中断 | 记录异常中断事件 |
@@ -260,6 +260,9 @@ paceflow/
 │   │   ├── pace-utils/               #     公共工具子模块
 │   │   ├── pre-tool-use.js           #     写代码前：任务检查 + 审批检查
 │   │   ├── pre-tool-use/             #     PreToolUse guard helper modules
+│   │   ├── subagent-start.js         #     subagent 派遣观察（logging-only）
+│   │   ├── notification.js           #     宿主通知事件观察（logging-only）
+│   │   ├── user-prompt-submit.js     #     每轮输入时活跃 CHG 一行注入
 │   │   │   ├── agent-lifecycle-guard.js
 │   │   │   ├── bash-guard.js
 │   │   │   ├── command-recognition.js

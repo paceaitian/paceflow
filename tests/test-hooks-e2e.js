@@ -8043,6 +8043,38 @@ test('23c. SubagentStop 在 close/archive 已离开活跃索引后兜底标记 o
   assert.strictEqual(owner.operation, 'close-chg');
 });
 
+test('23n. SubagentStop 无终态 SUCCESS 报告时不关闭 owner（codex P2-1，HOTFIX-20260815-01）', () => {
+  const dir = makeV6Project('sas-nonterminal-noclose', {
+    withIndex: false,
+    detail: chgDetail({ status: 'archived', task: '[x]', approved: true, verified: true }),
+    walkToday: false,
+  });
+  const ownerPath = seedChangeOwner(dir, 'CHG-20260504-01', {
+    sessionId: 'sid-sas-nonterm',
+    agentId: 'agent-sas-nonterm',
+    state: 'closing',
+  });
+  const transcriptPath = path.join(dir, 'agent-nonterm.jsonl');
+  fs.writeFileSync(transcriptPath, JSON.stringify({
+    type: 'user',
+    message: { content: ['operation: close-chg', 'target: CHG-20260504-01'].join('\n') },
+  }) + '\n', 'utf8');
+  const r = runHook('subagent-stop.js', {
+    cwd: dir,
+    stdin: {
+      session_id: 'sid-sas-nonterm',
+      agent_id: 'agent-sas-nonterm',
+      agent_type: 'paceflow:artifact-writer',
+      agent_transcript_path: transcriptPath,
+      // 中间轮 idle:无标准报告、无状态行——resume 场景下 agent 仍在继续工作
+      last_assistant_message: '正在继续处理 close-chg 的剩余文件写入……',
+    },
+  });
+  assert.strictEqual(r.code, 0);
+  const owner = JSON.parse(fs.readFileSync(ownerPath, 'utf8'));
+  assert.strictEqual(owner.state, 'closing', '无 SUCCESS 终态时 owner 不得被关闭(中间轮 idle 免疫)');
+});
+
 test('23h. SAS-N1: artifact-writer 派遣带 name 参数被硬拒（agent_type 漂移源头门，CHG-20260814-02）', () => {
   const dir = makeV6Project('sas-named-dispatch');
   const r = runHook('pre-tool-use.js', {
