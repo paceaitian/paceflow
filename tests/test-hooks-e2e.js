@@ -8150,6 +8150,74 @@ test('ST-AGED-2. 超期 finding 与其他硬 warning 并存时硬门照常 exit 
   assert.strictEqual(r.stdout.trim(), '', '硬阻断时不应输出软提醒 systemMessage（审计 P3-4 锁另一半契约）');
 });
 
+test('UPS-1. UserPromptSubmit 有 running CHG → 注入一行含 CHG id 且 ≤300 chars(CHG-20260814-06)', () => {
+  const dir = makeV6Project('ups-running', {
+    detail: chgDetail({ status: 'in-progress', task: '[/]', approved: true }),
+  });
+  const r = runHook('user-prompt-submit.js', { cwd: dir, stdin: { session_id: 'sid-ups-1', prompt: '继续' } });
+  assert.strictEqual(r.code, 0);
+  const out = JSON.parse(r.stdout);
+  const ctx = out.hookSpecificOutput.additionalContext;
+  assert.strictEqual(out.hookSpecificOutput.hookEventName, 'UserPromptSubmit');
+  assert.ok(ctx.includes('CHG-20260504-01'), `注入应含活跃 CHG id:${ctx}`);
+  assert.ok(ctx.includes('测试变更'), `注入应含人读标题(审计 P1-1 载荷断言):${ctx}`);
+  assert.ok(/任务 \d+\/\d+/.test(ctx), `注入应含任务进度:${ctx}`);
+  assert.ok(ctx.length <= 300, `注入应 ≤300 chars,实际 ${ctx.length}`);
+});
+
+test('UPS-4. closing-required(completed 未收口)仍注入且用收口措辞(审计 P2-2)', () => {
+  const dir = makeV6ProjectWithChanges('ups-closing', [
+    { id: 'CHG-20260504-01', indexMark: '[x]', status: 'completed', task: '[x]', approved: true },
+  ]);
+  const r = runHook('user-prompt-submit.js', { cwd: dir, stdin: { session_id: 'sid-ups-4', prompt: '下一步' } });
+  assert.strictEqual(r.code, 0);
+  const ctx = JSON.parse(r.stdout).hookSpecificOutput.additionalContext;
+  assert.ok(ctx.includes('CHG-20260504-01') && ctx.includes('已完成待验证'), `closing-required 应注入收口措辞:${ctx}`);
+});
+
+test('UPS-5. 多 running 按 CHG-ID 升序选主条目(审计 P3-3,索引物理序为创建倒序)', () => {
+  const dir = makeV6ProjectWithChanges('ups-sort', [
+    { id: 'CHG-20260504-02', indexMark: '[/]', status: 'in-progress', task: '[/]', approved: true },
+    { id: 'CHG-20260504-01', indexMark: '[/]', status: 'in-progress', task: '[/]', approved: true },
+  ]);
+  const r = runHook('user-prompt-submit.js', { cwd: dir, stdin: { session_id: 'sid-ups-5', prompt: '继续' } });
+  const ctx = JSON.parse(r.stdout).hookSpecificOutput.additionalContext;
+  assert.ok(ctx.includes('活跃变更:CHG-20260504-01'), `应选 ID 升序首位(与 SessionStart 排序一致):${ctx}`);
+  assert.ok(ctx.includes('另有 1 个'), `应计数其余活跃 CHG:${ctx}`);
+});
+
+test('UPS-6. foreign owner 的 running CHG 跳过不注入(审计 P2-1,防诱导误接手)', () => {
+  const dir = makeV6Project('ups-foreign', {
+    detail: chgDetail({ status: 'in-progress', task: '[/]', approved: true }),
+  });
+  seedChangeOwner(dir, 'CHG-20260504-01', {
+    sessionId: 'sid-other-session',
+    agentId: 'agent-other',
+    state: 'active',
+    worktree: 'worktree-b',
+    branch: 'branch-b',
+  });
+  const r = runHook('user-prompt-submit.js', { cwd: dir, stdin: { session_id: 'sid-ups-6', prompt: 'hi' } });
+  assert.strictEqual(r.code, 0);
+  assert.strictEqual(r.stdout, '', `foreign owner 的 CHG 不应注入:${r.stdout}`);
+});
+
+test('UPS-2. 无 running CHG(planned)→ 零输出', () => {
+  const dir = makeV6ProjectWithChanges('ups-planned', [
+    { id: 'CHG-20260504-01', indexMark: '[ ]', status: 'planned', task: '[ ]', approved: false },
+  ]);
+  const r = runHook('user-prompt-submit.js', { cwd: dir, stdin: { session_id: 'sid-ups-2', prompt: '你好' } });
+  assert.strictEqual(r.code, 0);
+  assert.strictEqual(r.stdout, '', '无 running CHG 应零输出(防每轮税)');
+});
+
+test('UPS-3. 非 PACE 项目 → 零输出', () => {
+  const dir = makeTmpDir('ups-non-pace');
+  const r = runHook('user-prompt-submit.js', { cwd: dir, stdin: { session_id: 'sid-ups-3', prompt: 'hi' } });
+  assert.strictEqual(r.code, 0);
+  assert.strictEqual(r.stdout, '');
+});
+
 test('23l. NTF-1: notification logging-only——退出 0 无 stdout 且 OBSERVE 日志落盘(CHG-20260814-05)', () => {
   const dir = makeV6Project('ntf-smoke');
   const logPath = path.join(dir, 'probe-ntf.log');

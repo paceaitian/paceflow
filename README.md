@@ -67,7 +67,7 @@ CHG/HOTFIX 是连续执行、可验证、可关闭的最小变更单元，不是
 /plugin install paceflow@paceaitian-paceflow
 ```
 
-安装后 11 类 hook 事件、配套 helper 脚本、4 个用户 skill、5 个用户命令和 `artifact-writer` agent 自动注册，零配置。重启 Claude Code 生效。
+安装后 12 类 hook 事件、配套 helper 脚本、4 个用户 skill、5 个用户命令和 `artifact-writer` agent 自动注册，零配置。重启 Claude Code 生效。
 
 > **可选**：设置环境变量 `PACE_VAULT_PATH` 指向你的 Obsidian Vault。新项目首次写代码或派 `artifact-writer` 时，PACEflow 会要求主 session 询问 artifact 存放在 `$PACE_VAULT_PATH/projects/<项目名>/` 还是本地项目目录，并把选择持久化到 Project Root 的 `.pace/artifact-root`；`local` 表示 Project Root 本地目录，不是当前子目录，也不是 `.pace/`。已有 `changes/` 的项目沿用现有位置。真实 Git worktree 和 `.claude/worktrees/<name>` 会自动归一到宿主项目名；也可用 `PACE_PROJECT_NAME` 显式指定项目名。自动化/headless 环境可设置 `PACE_ARTIFACT_ROOT=local|vault|/abs/path` 跳过询问。
 
@@ -182,13 +182,14 @@ brainstorming → writing-plans → pace-bridge（plan 转 CHG）→ auto-APPROV
 
 ## 工作原理
 
-### 11 类 Hook 事件覆盖完整生命周期
+### 12 类 Hook 事件覆盖完整生命周期
 
 | Hook | 触发时机 | 做什么 |
 |------|----------|--------|
 | **SessionStart** | 会话开始 / Compact 后 | 注入索引活跃区 + 活跃 CHG 摘要 |
 | **SubagentStart** | subagent 派遣时 | 仅记录 agent_id/agent_type 做生命周期对账（不阻断不注入） |
 | **Notification** | 宿主通知事件 | 仅记录事件字段形态收集触发分布（观察期，不阻断不注入） |
+| **UserPromptSubmit** | 每轮用户输入时 | 有 running CHG 时注入一行摘要（≤300 字符，第二防遗忘通道；无 running 零输出） |
 | **PreToolUse:Write/Edit/MultiEdit/Bash/PowerShell/Monitor/Agent** | AI 写代码、运行命令或派 artifact-writer 前 | 无活跃 CHG / 无审批 / 状态不一致 / 直接写 artifact 或 `.pace` 控制面 → deny |
 | **PostToolUse** | AI 写代码后 | schema/wikilink/归档/correction 提醒 |
 | **PostToolUseFailure** | 写入/验证工具失败后 | 提醒不要把失败工具调用视为完成 |
@@ -314,6 +315,7 @@ paceflow/
 | PostToolUseFailure | stdin JSON | stdout JSON（additionalContext）| N/A |
 | SubagentStart | stdin JSON | 无 stdout（logging-only）| N/A |
 | Notification | stdin JSON | 无 stdout（logging-only）| N/A |
+| UserPromptSubmit | stdin JSON | stdout JSON（additionalContext，条件注入）| N/A |
 | SubagentStop | stdin JSON | stdout JSON（additionalContext）| N/A |
 | StopFailure | stdin JSON | 无 stdout | 记录日志 |
 | SessionEnd | stdin JSON（sessionId）| 无 stdout | N/A |
