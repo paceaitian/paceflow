@@ -8150,6 +8150,28 @@ test('ST-AGED-2. 超期 finding 与其他硬 warning 并存时硬门照常 exit 
   assert.strictEqual(r.stdout.trim(), '', '硬阻断时不应输出软提醒 systemMessage（审计 P3-4 锁另一半契约）');
 });
 
+test('23l. NTF-1: notification logging-only——退出 0 无 stdout 且 OBSERVE 日志落盘(CHG-20260814-05)', () => {
+  const dir = makeV6Project('ntf-smoke');
+  const logPath = path.join(dir, 'probe-ntf.log');
+  const r = runHook('notification.js', {
+    cwd: dir,
+    env: { PACE_LOG_PATH: logPath },
+    stdin: { session_id: 'sid-ntf-smoke', notification_type: 'agent_completed', agent_id: 'a-ntf-1' },
+  });
+  assert.strictEqual(r.code, 0);
+  assert.strictEqual(r.stdout, '');
+  const logged = fs.existsSync(logPath) ? fs.readFileSync(logPath, 'utf8') : '';
+  assert.ok(logged.includes('Notification') && logged.includes('OBSERVE'), 'OBSERVE 日志应落盘');
+  assert.ok(logged.includes('notif_type=agent_completed'), '日志应含通知类型');
+});
+
+test('23m. NTF-2: notification 畸形 stdin 仍 exit 0 无输出(fail-open)', () => {
+  const dir = makeV6Project('ntf-garbage');
+  const r = runHook('notification.js', { cwd: dir, stdin: null });
+  assert.strictEqual(r.code, 0);
+  assert.strictEqual(r.stdout, '');
+});
+
 test('23k. SST-1: subagent-start logging-only——退出 0 无 stdout 且 OBSERVE 日志落盘', () => {
   const dir = makeV6Project('sas-start-smoke');
   const logPath = path.join(dir, 'probe-start.log');

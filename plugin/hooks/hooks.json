@@ -93,6 +93,18 @@
         ]
       }
     ],
+    "Notification": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/notification.js"]
+          }
+        ]
+      }
+    ],
     "SubagentStart": [
       {
         "matcher": "",
