@@ -1,0 +1,133 @@
+## 结论
+
+PACEflow 不是“噱头”，但也不是已经被证明能提升代码质量的成熟工程平台。
+
+更准确的定位是：
+
+> 一个实现认真、审计意识很强，但复杂度偏高、仍处于早期快速迭代阶段的 Claude Code 流程约束插件。
+
+我会把它评为：
+
+| 维度 | 评价 |
+|---|---:|
+| 问题定义与产品诚实度 | 8/10 |
+| 核心工程实现 | 7/10 |
+| 测试与审计意识 | 7/10 |
+| 易用性、复杂度控制 | 5/10 |
+| 发布与跨平台工程 | 5/10 |
+| 社区成熟度 | 3/10 |
+| 已证实的实际收益 | 4/10 |
+
+综合：**6/10 的优秀早期项目；不适合作为所有 Claude Code 项目的默认工作流。**
+
+## 我核对到的现状
+
+截至 2026-06-21：
+
+- 仓库创建约四个月，419 次提交。
+- 37 stars、11 forks、1 watcher。
+- 只有一名实际开发者，两个提交邮箱均是同一身份。
+- 历史上只有 3 个 Issue、0 个外部 PR。
+- 32 个 tag，但只有 11 个 GitHub Release。
+- v7.2.1 到 v7.2.21 集中在约一周内完成，说明修复速度快，也说明行为仍在剧烈变化。
+
+来源：[仓库](https://github.com/paceaitian/paceflow)、[发布记录](https://github.com/paceaitian/paceflow/releases)、[提交历史](https://github.com/paceaitian/paceflow/commits/master)、[Issues](https://github.com/paceaitian/paceflow/issues)、[贡献者](https://github.com/paceaitian/paceflow/graphs/contributors)。
+
+版本号已经到 7.2.21，但不能把它理解为成熟度。实际产品年龄、破坏性迁移和发版密度更接近 early adopter 阶段。
+
+## 做得好的部分
+
+1. **对能力边界非常诚实。**
+
+README 明确承认它不提升模型能力、不判断验证质量、不防刻意绕过。这比大量 AI workflow 项目的营销口径可靠得多，见 [README.md](/C:/Users/Xiao/Documents/Codex/2026-06-21/github-paceflow-paceflow/README.md:9)。
+
+2. **确实是机械门控，不只是提示词。**
+
+PreToolUse、Stop、SessionStart、SubagentStop、锁、owner、编号预留和迁移回滚都是真代码，不是文档里的架构愿景。多 worktree、并发写入和 artifact 一致性处理也明显经过真实踩坑。
+
+3. **测试投入很高。**
+
+运行时代码约 10.7k 行，测试约 15.5k 行，共约 854 个测试断言。没有第三方运行时依赖，供应链面较小。
+
+我本地在 Windows 实跑：
+
+- pace-utils：300/300
+- session layers：51/51
+- agent helpers：11/11
+- runner：6/6
+- hooks E2E：449/470
+- migrate-v7：15/16
+- plugin manifest 校验：通过
+
+即 **832/854 通过**。失败主要集中在 Windows 临时路径、反斜杠和 Golden snapshot 正规化，并未观察到核心状态机整体崩溃。
+
+4. **真正有价值的部分可能不是“强制”，而是恢复上下文。**
+
+CHG、finding、correction、walkthrough 和 SessionStart 重注入，确实能降低长任务在 compact、换 session 后丢失背景的概率。这比“多一道批准仪式”更有持续价值。
+
+## 核心问题
+
+1. **“强制执行”需要降级理解。**
+
+它不是安全沙箱：
+
+- 用户可 pause/disable。
+- Stop 连续阻止三次后会放行，见 [stop.js](/C:/Users/Xiao/Documents/Codex/2026-06-21/github-paceflow-paceflow/plugin/hooks/stop.js:12)。
+- Bash/PowerShell 保护依赖正则和命令启发式。
+- 写码门依赖扩展名白名单，明确选择“宁漏不误伤”，见 [constants.js](/C:/Users/Xiao/Documents/Codex/2026-06-21/github-paceflow-paceflow/plugin/hooks/pace-utils/constants.js:6)。
+- 它只验证 APPROVED、VERIFIED、REVIEWED 等证据存在，不验证内容是否真实、充分。
+
+所以它提供的是**确定性流程摩擦和防遗忘**，不是不可绕过的 enforcement。
+
+2. **流程复杂度已经成为主要风险。**
+
+一个流程插件包含：
+
+- 约 10.7k 行运行时代码；
+- 多索引、详情文件、frontmatter 状态机；
+- artifact-writer、reservation、owner、lock、migration；
+- 约 24.8k 行 Markdown 文档。
+
+这些复杂度本身会制造新的故障类别。项目自己的[诚实自评](/C:/Users/Xiao/Documents/Codex/2026-06-21/github-paceflow-paceflow/docs/self-assessment-2026-06-13-paceflow-on-its-own-development.md:1)也承认：许多审计抓到的问题，正是 PACEflow 自己引入的流程债。
+
+3. **工程发布面还不够成熟。**
+
+当前没有：
+
+- GitHub Actions CI；
+- Windows/Linux/macOS 测试矩阵；
+- SECURITY.md；
+- Issue/PR 模板；
+- 实质性的贡献指南——[CONTRIBUTING.md](/C:/Users/Xiao/Documents/Codex/2026-06-21/github-paceflow-paceflow/CONTRIBUTING.md:1)基本只有一条规则。
+
+Windows 上官方聚合测试目前不能全绿，这与项目显式支持 PowerShell 不相称。
+
+4. **收益证据不足。**
+
+项目自己的[研究报告](/C:/Users/Xiao/Documents/Codex/2026-06-21/github-paceflow-paceflow/docs/research-2026-06-13-does-paceflow-help.md:12)已经给出了正确结论：AI 流程失控是真问题，但没有因果证据证明 PACEflow 能减少返工或提高交付质量。
+
+37 stars、11 forks 表明有一个真实的小众需求，但尚不足以证明 PMF。没有外部 PR、第三方案例、留存率或失败拦截数据。
+
+## 适合与不适合
+
+适合：
+
+- 长生命周期、生产、高风险项目；
+- 经常跨 session、compact、worktree；
+- 重视审计轨迹和“为什么这样改”；
+- 愿意为流程完整性支付额外 token、时间和文件维护成本。
+
+不适合：
+
+- 原型、一次性脚本、小修小补；
+- 单人且已有良好 Git、测试、review 纪律；
+- 不以 Claude Code 为核心工具；
+- 期待插件自动提升设计或代码质量的人。
+
+## 最终判断
+
+PACEflow 的方向成立，代码也不是玩具。但现在最大的敌人已经不是“功能不够”，而是：
+
+> 自身复杂度、发布节奏、跨平台验证和缺乏外部实证。
+
+建议把它作为**单项目试点工具**使用，而不是全局默认安装。若继续发展，最高优先级应是 CI 测试矩阵、Windows 全绿、轻量模式、稳定发布周期，以及用真实外部项目记录“流程耗时、误拦截率、拦下的真实缺陷数”。这些数据会比继续增加 artifact 字段或审计层更有价值。

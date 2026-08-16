@@ -133,6 +133,27 @@ A 阶段完成标志：`task.md` 有活跃 `[[chg-*]]` / `[[hotfix-*]]` 索引�
 
 ---
 
+## Codex CLI 宿主（MVP）
+
+PACEflow 也运行在 OpenAI Codex CLI 上（同一插件目录，经 `.codex-plugin/plugin.json` 安装；SessionStart 注入会带「=== 宿主: Codex CLI ===」提示）。P-A-C-E-V-R 流程与本 skill 完全一致，差异只在「artifact 怎么写」：
+
+- **不派 `artifact-writer` 子代理**——Codex 子代理的 prompt 对 hook 不可读、子代理内 hooks 不触发，改用插件自带的 MCP server `paceflow`。本 skill 里每一处「派 `artifact-writer` operation=X」在 Codex 上都对应一次 MCP 工具调用，字段同名（连字符改下划线）：
+
+  | 本 skill 写法 | Codex MCP 工具 |
+  |------|------|
+  | reserve helper `--operation create-chg` | `reserve_artifact_id {operation:"create-chg"[, type:"hotfix"]}` |
+  | `create-chg` | `create_chg {reserved_id, reserved_file_prefix, title, slug, tasks, background, scope, technical_decision}` |
+  | `update-chg action=approve-and-start …` | `update_chg {target, action:"approve-and-start", task_id, approval_confirmed:true, approval_source, approval_evidence}` |
+  | `update-chg action=approve / update-status / append / verify / review` | `update_chg {target, action, …同名字段}` |
+  | `close-chg …` | `close_chg {target, verification_confirmed:true, complete_open_tasks:true, review_confirmed:true, review_source, review_findings, verify_summary, implementation_notes, walkthrough_summary}` |
+  | `record-finding` | `record_finding {title, summary, type, impact, body[, status, rejection_reason, related_changes]}` |
+  | 不知道当前 CHG-ID / artifact 目录 | `get_context {}`（只读） |
+
+- 每次 MCP 调用先经 PreToolUse 派遣门（与 Claude 侧 artifact-writer 派遣门同一套校验，deny 文案相同），server 内每个文件写入再以 artifact-writer 身份过写入门；产物形态与 artifact-writer 逐段同构。
+- **MVP 未覆盖**：`archive-chg` / `update-finding` / `record-correction` / `update-index` 与 batch create（`change-set-total>1`）——server 返回 `not-implemented`，请逐条调用或改到 Claude Code 宿主完成。
+- 无 SendMessage resume 编排、无 Workflow；需要用户确认时用 Codex 自身的提问方式，批准证据仍写进 `approval_evidence`。
+- 写码门覆盖 `apply_patch`（Codex 唯一文件写入工具）与 Bash；**Codex 子代理内的写入不受门约束（宿主限制）**，不要把写代码委托给子代理。
+
 ## Legacy v5 与 Worktree
 
 检测到 v5 时代 artifact 布局（`task.md` 含活跃详情、无 `changes/`）时只会收到一句布局提示：新变更直接按当前合同走 create-chg（首次创建即建出 `changes/`），v5 存量内容保持原样、不迁移；如需保留历史，可建议用户手动归档到 `<!-- ARCHIVE -->` 下方。

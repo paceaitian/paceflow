@@ -91,6 +91,7 @@ const {
   getProjectStateDir,
   getProjectRuntimeDir,
   executionContextForCwd,
+  _clearExecCtxMemo,
   hasChangesDir,
   legacyV5FilesInDir,
 } = require('./pace-utils/path-utils');
@@ -899,7 +900,7 @@ module.exports = {
   projectLogFields, projectLogEntry,
   // 项目检测与路径
   isPaceProject, detectSoftSignal, isTeammate, isArtifactWriterAgentType, normalizeSessionId, currentSessionId,
-  getArtifactDir, _clearArtifactDirCache, resolveEffectiveProjectRoot, getProjectStateDir, getProjectRuntimeDir,
+  getArtifactDir, _clearArtifactDirCache, _clearExecCtxMemo, resolveEffectiveProjectRoot, getProjectStateDir, getProjectRuntimeDir,
   getArtifactRootChoicePath, getProjectRootMarkerPath, normalizeArtifactRootChoice, readArtifactRootChoice, getConfiguredArtifactDir,
   isLocalArtifactRootChoicePath, localArtifactRootChoiceDenyReason, isProjectRootMarkerPath, projectRootMarkerDenyReason,
   getLegacyV5ArtifactDir, getV5MigrationInfo, v5LayoutNoticeMessage,

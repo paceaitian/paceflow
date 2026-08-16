@@ -93,6 +93,8 @@ CHG/HOTFIX 是连续执行、可验证、可关闭的最小变更单元，不是
 | 记录 correction | 先运行 reserve helper `--operation record-correction --cwd <项目 cwd>`，再派 operation=`record-correction` 并带 `reserved-file-prefix` |
 | 重排索引（findings.md/corrections.md 活跃区改日期降序新→旧） | operation=`update-index`，target=`findings.md`/`corrections.md`，action=`reorder` |
 
+**Codex CLI 宿主**：上表每个 operation 对应插件自带 MCP server 的同名工具（`paceflow.create_chg` / `update_chg` / `close_chg` / `record_finding` / `reserve_artifact_id` / `get_context`，字段同名、连字符改下划线），不派 `artifact-writer` 子代理；`archive-chg` / `update-finding` / `record-correction` / `update-index` 与 batch 在 Codex MVP 未实现（server 返回 `not-implemented`）。详见 Skill(paceflow:pace-workflow)「Codex CLI 宿主」段。
+
 `action=approve` 只完成 C 阶段，CHG 仍是 ready/deferred，不能据此写项目文件；只有 `approve-and-start` 或将任务恢复为 `[/]` 后才进入 E 阶段。`[!]` 表示 blocked/deferred：允许 Stop，但 Stop 会显示人可见提醒，恢复前不能继续写项目文件。
 
 v5 时代布局（task.md 含活跃详情、无 changes/）的项目直接按当前流程派 create-chg——首次创建即建出 `changes/**`，v5 存量保持原样不迁移。Git worktree 场景下 artifact root 与 `.pace` 运行态使用宿主项目共享位置；普通子目录默认继承最近父级 Project Root；普通项目文件仍写当前 worktree/cwd。

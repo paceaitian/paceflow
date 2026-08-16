@@ -1,0 +1,291 @@
+ ChatGPT desktop app *+*]:mt-3"> Copy Page Subagents Use subagents in ChatGPT and Codex, and configure custom Codex agents ChatGPT desktop app Copy Page ChatGPT Work and Codex can run subagent workflows by spawning specialized
+agents in parallel and then collecting their results in one response. This can
+be particularly helpful for complex tasks that are highly parallel, such as
+codebase exploration or implementing a multi-step feature plan. 
+ In local Codex clients, you can also define custom agents with different model
+configurations and instructions for different tasks. 
+ Availability 
+ ChatGPT Work exposes subagent workflows and activity to eligible accounts. 
+ Current Codex releases enable subagent workflows by default. Subagent activity
+appears in the ChatGPT desktop app, Codex CLI, and the IDE extension. 
+ Because each subagent does its own model and tool work, subagent workflows
+consume more tokens than comparable single-agent runs. 
+ In ChatGPT Work, ask ChatGPT to delegate independent work to subagents. The
+agents run in ChatGPT’s hosted environment, and the chat shows their
+activity and results. At most intelligence levels, ask for delegation
+explicitly. With Ultra, ChatGPT can proactively delegate work when parallel
+agents would materially improve speed or quality. 
+ Ask Codex in an app chat to delegate independent parts of the work to
+subagents. Current local Codex releases delegate when you ask directly or when
+applicable AGENTS.md or skill instructions request it. The app surfaces each
+subagent thread so you can inspect its work and the summary returned to the main
+chat. 
+ Ask Codex in an interactive CLI session to use subagents. Codex can also follow
+applicable AGENTS.md or skill instructions that request delegation. Use
+ /agent to inspect and switch between agent threads while they run. The main
+thread collects the subagent results into its final response. 
+ Ask Codex in an IDE chat to delegate independent parts of the work to subagents.
+Codex can also follow applicable AGENTS.md or skill instructions that request
+delegation. When the background-agent UI is available, active subagents appear
+above the composer. Expand the panel to see their status, stop all active
+subagents, or open an individual subagent thread. 
+ Why subagent workflows help 
+ Even with large context windows, models have limits. If you flood the main chat (where you’re defining requirements, constraints, and decisions) with noisy intermediate output such as exploration notes, test logs, stack traces, and command output, the session can become less reliable over time. 
+ This is often described as: 
+ Context pollution : useful information gets buried under noisy intermediate output. 
+ Context rot : performance degrades as the chat fills up with less relevant details. 
+ For background, see the Chroma writeup on context rot . 
+ Subagent workflows help by moving noisy work off the main thread: 
+ Keep the main agent focused on requirements, decisions, and final outputs. 
+ Run specialized subagents in parallel for exploration, tests, or log analysis. 
+ Return summaries from subagents instead of raw intermediate output. 
+ They can also save time when the work can run independently in parallel, and
+they make larger-shaped tasks more tractable by breaking them into bounded
+pieces. For example, Codex can split analysis of a multi-million-token
+document into smaller problems and return distilled takeaways to the main
+thread. 
+ As a starting point, use parallel agents for read-heavy tasks such as
+exploration, tests, triage, and summarization. Be more careful with parallel
+write-heavy workflows, because agents editing code at once can create
+conflicts and increase coordination overhead. 
+ Core terms 
+ Codex uses a few related terms in subagent workflows: 
+ Subagent workflow : A workflow where Codex runs parallel agents and combines their results. 
+ Subagent : A delegated agent that Codex starts to handle a specific task. 
+ Agent thread : The thread where a subagent does its work. Supported clients let you open these threads to inspect progress or results. 
+ Triggering subagent workflows 
+ At most intelligence levels, ask for subagents or parallel agent work
+directly. Ultra enables proactive delegation, so ChatGPT can delegate suitable
+independent work without a separate request. 
+ Ask for subagents or parallel agent work directly. Codex can also delegate when
+applicable project or skill instructions request it. 
+ In practice, manual triggering means using direct instructions such as
+“spawn two agents,” “delegate this work in parallel,” or “use one agent per
+point.” Subagent workflows consume more tokens than comparable single-agent runs
+because each subagent does its own model and tool work. 
+ A good subagent prompt should explain how to divide the work, whether Codex
+should wait for all agents before continuing, and what summary or output to
+return. 
+```
+ Review this branch with parallel subagents. Spawn one subagent for security risks, one for test gaps, and one for maintainability. Wait for all three, then summarize the findings by category with file references. 
+```
+ Choosing models and reasoning 
+ Different agents need different model and reasoning settings. 
+ In ChatGPT Work, choose a model and an intelligence level from the composer.
+Available intelligence levels can include Light , Medium , High ,
+ Extra High , and Max , depending on the selected model. Ultra is
+available only to eligible accounts and supported models. It uses maximum
+reasoning and lets ChatGPT proactively delegate suitable work to subagents. At other intelligence levels, ask for subagents explicitly when you want work
+delegated in parallel. 
+ If you don’t pin a model or model_reasoning_effort , Codex can choose a setup
+that balances intelligence, speed, and price for the task. It may favor gpt-5.6-terra for fast scans or a higher-effort gpt-5.6 configuration for more demanding reasoning. When you want finer control, steer that choice in your prompt or set model and model_reasoning_effort directly in the agent file. For most tasks in Codex, start with 
+ gpt-5.6 . Use 
+ gpt-5.6-terra when you want
+a faster, lower-cost option for lighter subagent work. Model choice 
+ gpt-5.6 : Start here for demanding agents. It’s strongest for ambiguous, multi-step work that needs planning, tool use, validation, and follow-through across a larger context. 
+ gpt-5.6-terra : Use for agents that favor speed and efficiency over depth, such as exploration, read-heavy scans, large-file review, or processing supporting documents. It works well for parallel workers that return distilled results to the main agent. 
+ gpt-5.6-luna : Use for fast, narrowly scoped agents handling clear, repeatable, or high-volume work. 
+ Reasoning effort ( model_reasoning_effort ) 
+ ultra : Use for the deepest reasoning when the selected model supports
+it. 
+ max and xhigh : Use for especially demanding reasoning when the
+selected model supports these levels. 
+ high : Use when an agent needs to trace complex logic, check assumptions, or work through edge cases (for example, reviewer or security-focused agents). 
+ medium : A balanced default for most agents. 
+ low : Use when the task is straightforward and speed matters most. 
+ Higher reasoning effort increases response time and token usage, but it can improve quality for complex work. For details, see Models , Config basics , and Configuration Reference . 
+ Orchestration and thread controls 
+ ChatGPT or Codex handles orchestration across agents, including spawning new
+subagents, routing follow-up instructions, waiting for results, and closing
+agent threads. 
+ When many agents are running, Codex waits until all requested results are
+available, then returns a consolidated response. 
+ At most intelligence levels, ChatGPT spawns agents after a direct request. With
+Ultra, ChatGPT can also delegate proactively when parallel work is useful. 
+ Current local Codex releases spawn agents after a direct request or applicable
+project or skill instruction. 
+ To see it in action, try the following prompt on your project: 
+```
+ I would like to review the following points on the current PR (this branch vs main). Spawn one agent per point, wait for all of them, and summarize the result for each point. 
+ 1. Security issue 
+ 2. Code quality 
+ 3. Bugs 
+ 4. Race 
+ 5. Test flakiness 
+ 6. Maintainability of the code 
+```
+ Managing subagents 
+ Open Subagents to see read-only Active and Done lists. Select a
+completed subagent to inspect its details and result. The web sidebar reports
+subagent activity; it doesn’t provide controls to stop or steer an individual
+subagent. 
+ Open a subagent thread from the activity shown in the main thread to inspect
+its work. 
+ Ask Codex directly to steer a running subagent, stop it, or close completed
+subagent threads. 
+ Report checklist Presentation checklist started working Active No active subagents Done · 3 Model api audit 2m Audit complete; no endpoint compatibility issues were found. Package audit 3m Safest workflow is a focused dependency update. Landing audit 4m Audit complete; no final layout blockers remain. 
+ Use /agent in the CLI to switch between active agent threads and inspect the ongoing thread. 
+ Ask Codex directly to steer a running subagent, stop it, or close completed agent threads. 
+ When the background-agent panel is available, expand it to inspect status,
+stop active subagents, or open a subagent thread. 
+ Ask Codex directly to steer a running subagent, stop it, or close completed
+subagent threads. 
+ Approvals and sandbox controls 
+ Subagents inherit your current sandbox policy. 
+ ChatGPT Work runs subagents in its hosted environment and doesn’t expose a
+local Codex sandbox or approval-mode control. Subagents use the tools available
+to the parent chat. Website and connector permissions remain
+tool-specific. 
+ Subagents inherit the permission mode selected beneath the composer. Choose the
+permission mode for the parent turn before you ask Codex to delegate work. 
+ In interactive CLI sessions, approval requests can surface from inactive agent
+threads even while you are looking at the main thread. The approval overlay
+shows the source thread label, and you can press o to open that thread before
+you approve, reject, or answer the request. In non-interactive flows, or whenever a run can’t surface a fresh approval, an
+action that needs new approval fails and Codex surfaces the error back to the
+parent workflow. Codex also reapplies the parent turn’s live runtime overrides when it spawns a
+child. That includes sandbox and approval choices you set interactively during
+the session, such as /permissions changes or --yolo , even if the selected
+custom agent file sets different defaults. 
+ Subagents inherit the permission mode selected beneath the composer. Choose
+the permission mode for the parent turn before you ask Codex to delegate work. 
+ You can also override the sandbox configuration for individual custom agents , such as explicitly marking one to work in read-only mode. Custom agents Codex ships with built-in agents: 
+ default : general-purpose fallback agent. 
+ worker : execution-focused agent for implementation and fixes. 
+ explorer : read-heavy codebase exploration agent. 
+ To define your own custom agents, add standalone TOML files under
+ ~/.codex/agents/ for personal agents or .codex/agents/ for project-scoped
+agents. Each file defines one custom agent. Codex loads these files as configuration
+layers for spawned sessions, so custom agents can override the same settings as
+a normal Codex session config. That can feel heavier than a dedicated agent
+manifest, and the format may evolve as authoring and sharing mature. Every standalone custom agent file must define: 
+ name 
+ description 
+ developer_instructions 
+ If a custom agent file sets model or model_reasoning_effort , the value in
+the file takes precedence. Otherwise, Codex resolves each setting independently:
+an explicit spawn value, then the corresponding [agents] default, then the
+parent’s value. If a spawn selects a different model and neither an explicit nor
+configured effort is present, Codex uses that model’s default effort. Other
+session settings, such as sandbox_mode , mcp_servers , and skills.config ,
+inherit from the parent when the custom agent file omits them. Global settings Global subagent settings still live under [agents] in your configuration . 
+ Field Type Required Purpose agents.enabled boolean No Enable or disable multi-agent tools. agents.max_concurrent_threads_per_session number No Cap concurrently open spawned-agent threads, excluding the primary. agents.default_subagent_model string No Set the default model for spawned agents. agents.default_subagent_reasoning_effort string No Set the default reasoning effort for spawned agents. agents.interrupt_message boolean No Record a model-visible message when an agent turn is interrupted. Notes: 
+ agents.enabled defaults to true . Set it to false to disable multi-agent tools. 
+ When you leave agents.max_concurrent_threads_per_session unset, Codex chooses the default. Existing configurations can keep using agents.max_threads as a legacy alias. 
+ Explicit spawn values override agents.default_subagent_model and agents.default_subagent_reasoning_effort . 
+ agents.interrupt_message defaults to true . Set it to false to omit the model-visible interruption message from the agent’s context. 
+ If a custom agent name matches a built-in agent such as explorer , your custom agent takes precedence. 
+ Custom agent file schema 
+ Field Type Required Purpose name string Yes Agent name Codex uses when spawning or referring to this agent. description string Yes Human-facing guidance for when Codex should use this agent. developer_instructions string Yes Core instructions that define the agent’s behavior. You can also include other supported config.toml keys in a custom agent file, such as model , model_reasoning_effort , sandbox_mode , mcp_servers , and skills.config . Codex identifies the custom agent by its name field. Matching the filename to
+the agent name is the simplest convention, but the name field is the source
+of truth. Example custom agents The best custom agents are narrow and opinionated. Give each one clear job, a
+tool surface that matches that job, and instructions that keep it from
+drifting into adjacent work. Example 1: PR review This pattern splits review across three focused custom agents: 
+ pr_explorer maps the codebase and gathers evidence. 
+ reviewer looks for correctness, security, and test risks. 
+ docs_researcher checks framework or API documentation through a dedicated MCP server. 
+ Project config ( .codex/config.toml ): 
+```
+ [ agents ] 
+ max_concurrent_threads_per_session = 8 
+```
+ .codex/agents/pr-explorer.toml : 
+```
+ name = "pr_explorer" 
+ description = "Read-only codebase explorer for gathering evidence before changes are proposed." 
+ model = "gpt-5.3-codex-spark" 
+ model_reasoning_effort = "medium" 
+ sandbox_mode = "read-only" 
+ developer_instructions = """ 
+ Stay in exploration mode. 
+ Trace the real execution path, cite files and symbols, and avoid proposing fixes unless the parent agent asks for them. 
+ Prefer fast search and targeted file reads over broad scans. 
+ """ 
+```
+ .codex/agents/reviewer.toml : 
+```
+ name = "reviewer" 
+ description = "PR reviewer focused on correctness, security, and missing tests." 
+ model = "gpt-5.6-terra" 
+ model_reasoning_effort = "high" 
+ sandbox_mode = "read-only" 
+ developer_instructions = """ 
+ Review code like an owner. 
+ Prioritize correctness, security, behavior regressions, and missing test coverage. 
+ Lead with concrete findings, include reproduction steps when possible, and avoid style-only comments unless they hide a real bug. 
+ """ 
+```
+ .codex/agents/docs-researcher.toml : 
+```
+ name = "docs_researcher" 
+ description = "Documentation specialist that uses the docs MCP server to verify APIs and framework behavior." 
+ model = "gpt-5.6-luna" 
+ model_reasoning_effort = "medium" 
+ sandbox_mode = "read-only" 
+ developer_instructions = """ 
+ Use the docs MCP server to confirm APIs, options, and version-specific behavior. 
+ Return concise answers with links or exact references when available. 
+ Do not make code changes. 
+ """ 
+ [ mcp_servers . openaiDeveloperDocs ] 
+ url = "https://developers.openai.com/mcp" 
+```
+ This setup works well for prompts like: 
+```
+ Review this branch against main. Have pr_explorer map the affected code paths, reviewer find real risks, and docs_researcher verify the framework APIs that the patch relies on. 
+```
+ Example 2: Frontend integration debugging This pattern is useful for UI regressions, flaky browser flows, or integration bugs that cross application code and the running product. Project config ( .codex/config.toml ): 
+```
+ [ agents ] 
+ max_concurrent_threads_per_session = 6 
+```
+ .codex/agents/code-mapper.toml : 
+```
+ name = "code_mapper" 
+ description = "Read-only codebase explorer for locating the relevant frontend and backend code paths." 
+ model = "gpt-5.6-luna" 
+ model_reasoning_effort = "medium" 
+ sandbox_mode = "read-only" 
+ developer_instructions = """ 
+ Map the code that owns the failing UI flow. 
+ Identify entry points, state transitions, and likely files before the worker starts editing. 
+ """ 
+```
+ .codex/agents/browser-debugger.toml : 
+```
+ name = "browser_debugger" 
+ description = "UI debugger that uses browser tooling to reproduce issues and capture evidence." 
+ model = "gpt-5.6-terra" 
+ model_reasoning_effort = "high" 
+ sandbox_mode = "workspace-write" 
+ developer_instructions = """ 
+ Reproduce the issue in the browser, capture exact steps, and report what the UI actually does. 
+ Use browser tooling for screenshots, console output, and network evidence. 
+ Do not edit application code. 
+ """ 
+ [ mcp_servers . chrome_devtools ] 
+ url = "http://localhost:3000/mcp" 
+ startup_timeout_sec = 20 
+```
+ .codex/agents/ui-fixer.toml : 
+```
+ name = "ui_fixer" 
+ description = "Implementation-focused agent for small, targeted fixes after the issue is understood." 
+ model = "gpt-5.3-codex-spark" 
+ model_reasoning_effort = "medium" 
+ developer_instructions = """ 
+ Own the fix once the issue is reproduced. 
+ Make the smallest defensible change, keep unrelated files untouched, and validate only the behavior you changed. 
+ """ 
+ [[ skills . config ]] 
+ path = "/Users/me/.agents/skills/docs-editor/SKILL.md" 
+ enabled = false 
+```
+ This setup works well for prompts like: 
+```
+ Investigate why the settings modal fails to save. Have browser_debugger reproduce it, code_mapper trace the responsible code path, and ui_fixer implement the smallest fix once the failure mode is clear. 
+```
+Previous
+ AGENTS.md 
+Next
+ Speed 

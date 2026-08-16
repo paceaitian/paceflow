@@ -3417,7 +3417,9 @@ test('plugin runtime root 不包含开发资料', () => {
   const pluginRoot = path.join(repoRoot, 'plugin');
   // CHG-B B2：commands/ 为 plugin slash command 发布面（plugin.json "commands" 声明），加入白名单。
   // codex 审计补遗：LICENSE 是发布合规文件（plugin.json 声明 MIT），随 marketplace 打包 ./plugin，加入白名单。
-  const allowedTopLevel = new Set(['.claude-plugin', 'agent-references', 'agents', 'commands', 'hooks', 'migrate', 'skills', 'LICENSE']);
+  // CHG-20260815-01：.codex-plugin 是 Codex CLI 的插件 manifest（与 .claude-plugin 并存不双载，探针 M1/M2），加入白名单。
+  // CHG-20260815-02：mcp/ 是 Codex 宿主的 artifact 写入 server（.codex-plugin/plugin.json mcpServers 指向 mcp/paceflow-server.js）。
+  const allowedTopLevel = new Set(['.claude-plugin', '.codex-plugin', 'agent-references', 'agents', 'commands', 'hooks', 'mcp', 'migrate', 'skills', 'LICENSE']);
   for (const name of fs.readdirSync(pluginRoot)) {
     assert.ok(allowedTopLevel.has(name), `plugin runtime 顶层不应包含 ${name}`);
   }

@@ -172,7 +172,7 @@ artifact-writer 逐块建 N 个 `changes/<id>.md`（各写 `change-set` + `chang
 | `subagent-start.js` | logging-only：记录 subagent 派遣时的 agent_id/agent_type 做生命周期对账 |
 | `notification.js` | logging-only：记录宿主 Notification 事件字段形态收集触发分布（观察期） |
 | `user-prompt-submit.js` | 每轮用户输入时，本 session 有 running/closing-required CHG 则注入一行摘要（第二防遗忘通道；pause/无命中零输出） |
-| `pre-tool-use.js` | 写代码、运行 Bash/PowerShell/Monitor 命令或派 artifact-writer 前，检查活跃 CHG、详情文件、APPROVED、可执行状态，并阻止直接写 artifact / `.pace` 控制面 |
+| `pre-tool-use.js` | Write/Edit/MultiEdit 写代码前检查活跃 CHG、详情文件、APPROVED、可执行状态（写码门）；Bash/PowerShell/Monitor 只阻止改 artifact / `.pace` 控制面的命令并识别 helper 命令（不裁 shell 对普通代码文件的写入）；Agent 派遣 artifact-writer 时校验字段门 |
 | `post-tool-use.js` | schema/wikilink/直接 C-V 写入/correction knowledge 提醒；verified 未 reviewed 时 `review-missing` 软提醒 |
 | `post-tool-use-failure.js` | 写入/验证工具失败后提醒不要误判完成 |
 | `subagent-stop.js` | 观察 `artifact-writer` 报告标题/状态并记录 transcript |
@@ -222,6 +222,22 @@ PreToolUse 的拒绝分三档。**teammate 模式（`CLAUDE_CODE_TEAM_NAME` 非�
 
 ---
 
+## 5.2 Codex CLI 宿主
+
+同一插件目录也能被 OpenAI Codex CLI 安装（`.codex-plugin/plugin.json`；codex-cli 0.147.0 在 Linux 与 Windows 上均一手实测完整闭环——Windows 上 `${CLAUDE_PLUGIN_ROOT}` 同样被展开，无需 `commandWindows`；但 Windows Codex 不认「exit 2 + stderr」阻断形态，adapter 统一翻译成 JSON `decision:block` / `permissionDecision:deny`，实测记录见 `docs/research/codex-port/mvp-windows-acceptance-2026-08-16.md`）。
+
+| 组件 | 位置 | 作用 |
+|------|------|------|
+| Codex manifest | `.codex-plugin/plugin.json` | `hooks` → `hooks/hooks.codex.json`；`mcpServers.paceflow` → `mcp/paceflow-server.js`（`cwd: "."` 相对插件根解析）。与 `.claude-plugin/plugin.json` 并存，Codex 取前者、Claude 取后者，互不双载 |
+| Codex hook 注册面 | `hooks/hooks.codex.json` | 单 command 字符串形态（Codex 无 `args` 字段）：SessionStart core/artifact、UserPromptSubmit、PreToolUse `apply_patch\|Bash\|mcp__paceflow__.*`、PostToolUse `apply_patch`、Stop、PreCompact、SessionEnd（Codex 无 Notification / PostToolUseFailure / StopFailure；SubagentStart/SubagentStop 在 Codex 子代理内不触发，未注册） |
+| 宿主适配层 | `hooks/codex-adapter.js` | 只做 I/O 翻译再转发真 hook：`apply_patch` 逐文件合成 Write/Edit（任一 deny 即整体 deny，不可解析或超 20s 预算 fail-closed）；`mcp__paceflow__*` 调用把参数序列化成 artifact-writer 字段文本合成 Agent 派遣事件（原样复用 agent-lifecycle-guard 全部门），放行时 `updatedInput` 注入可信 `_pace_session_id/_pace_cwd`；SessionStart/UserPromptSubmit 纯文本包成 JSON `additionalContext`（core 组追加宿主提示）；exit 2 + stderr 透传；deny 文案追加 Codex 译注 |
+| MCP artifact server | `mcp/paceflow-server.js` + `mcp/lib/` | 手写 JSON-RPC over stdio（零依赖）。工具：`get_context` / `reserve_artifact_id` / `create_chg` / `update_chg`（approve / approve-and-start / update-status / append / verify / review）/ `close_chg` / `record_finding`；`archive_chg` / `update_finding` / `record_correction` / `update_index` 返回 `not-implemented`。session/cwd 取自 hook 注入 `_pace_*` > Codex `_meta["x-codex-turn-metadata"]` > env。每个文件写入以 `artifact-writer` 身份合成 Write/Edit 事件先跑真 `pre-tool-use.js`（reservation / owner / 资源锁 / 完整性门全复用，deny 即止零写入），全部预检通过后落盘，再逐个跑 `post-tool-use.js`；产物与 artifact-writer 逐段同构（9-key frontmatter、三标记、`### T-NNN`、审查记录、归档索引、walkthrough 行） |
+| session 身份 | `pace-utils/session.js` | env 兜底顺序 stdin `session_id` > `CODEX_THREAD_ID`（Codex Bash 工具环境）> `CLAUDE_CODE_SESSION_ID`，让 Codex 里跑的 reserve helper 与 hook 门读到同一 owner |
+
+能力边界（MVP）：batch create（`change-set-total>1`）在 MCP 参数里不可表达，adapter 直接 deny 并引导逐条调用；Codex 子代理内的文件写入不受门约束（宿主未提供 subagent-aware hooks，[openai/codex#16226](https://github.com/openai/codex/issues/16226)），不要把写代码委托给子代理；Stop 无 `background_tasks` 字段，后台软放行分支自然不生效（退化为硬门语义）；hook 超时在 Codex 是软失败（继续执行），故 adapter 对多文件 apply_patch 设总预算主动 fail-closed；受管企业环境 `requirements.toml` 的 `allow_managed_hooks_only` 会屏蔽插件 hooks。
+
+安装（与 Claude 同源，Codex 直接读仓库根 `.claude-plugin/marketplace.json`）：`codex plugin marketplace add paceaitian/paceflow` → `codex plugin add paceflow@paceaitian-paceflow` → `/hooks` 审阅信任 → 新线程。研究与真机验收记录：`docs/research-2026-08-15-codex-port-feasibility.md`、`docs/research/codex-port/`。
+
 ## 6. 安装
 
 在 Claude Code 中：
@@ -239,6 +255,7 @@ PreToolUse 的拒绝分三档。**teammate 模式（`CLAUDE_CODE_TEAM_NAME` 非�
 - `agents/`
 - `.claude-plugin/plugin.json`
 - `hooks/hooks.json`
+- `.codex-plugin/plugin.json` + `hooks/hooks.codex.json` + `mcp/`（Codex CLI 宿主，见 §5.2；Claude Code 不读取）
 
 源码仓库中这些运行时资产位于 `plugin/`；安装到 Claude Code cache 后，`plugin/` 目录本身不会作为额外前缀出现。
 
@@ -250,6 +267,7 @@ Hook 单元/E2E（聚合入口，任一子套件失败即整体非零退出）�
 
 ```bash
 node tests/run-all.js
+# 套件：pace-utils / hooks-e2e / session-layers / migrate-v7 / agent-helpers / codex-adapter / mcp-server / run-all-self / plugin-validate / git-diff-check
 # 迭代分片：PACE_TEST_FILTER=<套件名子串> node tests/run-all.js
 # 发版后核整段 release 区间 whitespace（push 后 @{upstream}..HEAD=0 时显式覆盖 previous-release..HEAD）：
 PACE_RELEASE_BASE=<上一个 release commit> node tests/run-all.js

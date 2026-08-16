@@ -1,0 +1,37 @@
+{
+ "hooks": {
+  "SessionStart": [
+   {
+    "hooks": [
+     {
+      "type": "command",
+      "command": "node /mnt/k/AI/paceflow-hooks/paceflow/plugin/hooks/session-start.js --group core",
+      "timeout": 20
+     }
+    ]
+   }
+  ],
+  "PreToolUse": [
+   {
+    "hooks": [
+     {
+      "type": "command",
+      "command": "node /tmp/claude-1000/-mnt-k-AI-paceflow-hooks-paceflow/5eefe35c-de9f-4c6c-9fff-e6fe8917cdf2/scratchpad/codex-port/codex-adapter.js /mnt/k/AI/paceflow-hooks/paceflow/plugin/hooks/pre-tool-use.js",
+      "timeout": 30
+     }
+    ]
+   }
+  ],
+  "Stop": [
+   {
+    "hooks": [
+     {
+      "type": "command",
+      "command": "node /mnt/k/AI/paceflow-hooks/paceflow/plugin/hooks/stop.js",
+      "timeout": 20
+     }
+    ]
+   }
+  ]
+ }
+}
