@@ -1,0 +1,38 @@
+{
+  "description": "PACEflow hooks for Codex CLI. 每条都经 hooks/codex-adapter.js 翻译后转发给与 Claude Code 共用的真 hook(hooks/*.js);hooks.json 是 Claude Code 注册面,本文件是 Codex 注册面(.codex-plugin/plugin.json 的 hooks 字段指向这里)。",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/codex-adapter.js\" session-start --group core", "timeout": 30, "additionalContextLimit": 12000, "statusMessage": "PACEflow 注入项目上下文" },
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/codex-adapter.js\" session-start --group artifact", "timeout": 30, "additionalContextLimit": 12000, "statusMessage": "PACEflow 注入 artifact 摘要" }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/codex-adapter.js\" user-prompt-submit", "timeout": 15, "additionalContextLimit": 2000 } ] }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "apply_patch|Bash|mcp__paceflow__.*",
+        "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/codex-adapter.js\" pre-tool-use", "timeout": 30, "statusMessage": "PACEflow 门检查" } ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "apply_patch",
+        "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/codex-adapter.js\" post-tool-use", "timeout": 30 } ]
+      }
+    ],
+    "Stop": [
+      { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/codex-adapter.js\" stop", "timeout": 30, "statusMessage": "PACEflow 完成度检查" } ] }
+    ],
+    "PreCompact": [
+      { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/codex-adapter.js\" pre-compact", "timeout": 30 } ] }
+    ],
+    "SessionEnd": [
+      { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/codex-adapter.js\" session-end", "timeout": 3 } ] }
+    ]
+  }
+}

@@ -15,8 +15,15 @@ function normalizeSessionId(sessionId) {
   return String(sessionId || '').trim();
 }
 
+// 宿主注入的 session 身份环境变量(CHG-20260815-01):Codex CLI 在 Bash 工具环境里给的是 CODEX_THREAD_ID
+// (= hook stdin 的 session_id,探针 M7);Claude Code 给 CLAUDE_CODE_SESSION_ID。Codex 嵌套跑在 Claude 里时两者
+// 并存,CODEX_THREAD_ID 才是当前会话,故优先——否则 reserve helper 与 hook 的 owner 身份会错位(研究 E6)。
+function hostSessionEnv() {
+  return process.env.CODEX_THREAD_ID || process.env.CLAUDE_CODE_SESSION_ID || '';
+}
+
 function currentSessionId() {
-  return normalizeSessionId(process.env.CLAUDE_CODE_SESSION_ID || _lastHookSessionId);
+  return normalizeSessionId(hostSessionEnv() || _lastHookSessionId);
 }
 
 function parseHookStdin(rawInput) {
@@ -26,7 +33,7 @@ function parseHookStdin(rawInput) {
   // PUC-02/ROB-01：JSON.parse 对字面量 null/数组/数字返回非对象真值（ok=true），
   // 后续 parsed.session_id 等属性访问会对 null 抛 TypeError；归一为空对象并置 ok=false。
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) { parsed = {}; ok = false; }
-  const sessionId = normalizeSessionId(parsed.session_id || parsed.sessionId || process.env.CLAUDE_CODE_SESSION_ID || '');
+  const sessionId = normalizeSessionId(parsed.session_id || parsed.sessionId || hostSessionEnv());
   if (sessionId) _lastHookSessionId = sessionId;
   return {
     ok,
