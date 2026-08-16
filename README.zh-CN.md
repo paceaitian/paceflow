@@ -4,7 +4,7 @@
 
 [![ci](https://github.com/paceaitian/paceflow/actions/workflows/ci.yml/badge.svg)](https://github.com/paceaitian/paceflow/actions/workflows/ci.yml)
 
-> **PACEflow 是一套 Claude Code hook，用工具层的确定性门，让 AI 在长任务里不忘走流程——先规划获批再动手、改完验证再收尾；过程记账卸给一次性子代理，并跨 session 恢复。**
+> **PACEflow 是一套 Claude Code hook（同一插件也能装进 OpenAI Codex CLI），用工具层的确定性门，让 AI 在长任务里不忘走流程——先规划获批再动手、改完验证再收尾；过程记账卸给一次性子代理（Codex 上是插件自带的 MCP server），并跨 session 恢复。**
 
 ## 它做什么
 
@@ -12,7 +12,7 @@ PACEflow 在工具调用边界加两个确定性 hook 门，外加一套跨 sess
 
 - **没有获批的活跃变更（CHG），写代码被拒**（PreToolUse）。逼出「先建变更记录、获批，再动手」。
 - **没验证 / 没审计就想结束会话，被 Stop 拦下**。逼出「改完先验证、审计，再收尾归档」。
-- **过程记账由 `artifact-writer` 子代理写**，不占用主 session 上下文。
+- **过程记账由 `artifact-writer` 子代理写**，不占用主 session 上下文（Codex 宿主上由插件自带的 `paceflow` MCP server 确定性写入，见「安装 › Codex CLI」）。
 - **跨 session 恢复**：CHG / finding / correction / walkthrough 索引在 SessionStart 自动重注入，新 session（或 compact 后）接上「上次做到哪、为什么这么改」。
 
 门只确认**步骤发生过、顺序对、留了记录**：`VERIFIED` 表示验证这一步被记录了，`REVIEWED` 表示审计这一步被记录了。内容对错由测试、CI、review 和模型能力决定，门不裁决。
@@ -61,7 +61,7 @@ CHG/HOTFIX 是连续执行、可验证、可关闭的最小变更单元，不是
 
 ## 安装
 
-请使用 Claude Code `2.1.218` 或更高版本。两个硬依赖：hook 注册使用 `2.1.139` 新增的 `hooks[].args` exec form（更早版本可能只执行 `command: "node"` 不传脚本路径）；hook 注册面含 `SubagentStart` 事件（存在性已实测的最早版本是 `2.1.218`）——**宿主不认识插件 hooks.json 里的任一事件名时,会把该插件的全部 hooks 整份静默丢弃**（实测），即旧宿主上 PACEflow 所有门会无提示失效。
+Claude Code 请使用 `2.1.218` 或更高版本（Codex CLI 见下方「Codex CLI（MVP）」）。两个硬依赖：hook 注册使用 `2.1.139` 新增的 `hooks[].args` exec form（更早版本可能只执行 `command: "node"` 不传脚本路径）；hook 注册面含 `SubagentStart` 事件（存在性已实测的最早版本是 `2.1.218`）——**宿主不认识插件 hooks.json 里的任一事件名时,会把该插件的全部 hooks 整份静默丢弃**（实测），即旧宿主上 PACEflow 所有门会无提示失效。
 
 ```bash
 # 在 Claude Code 中执行（2 条命令）
@@ -200,6 +200,8 @@ brainstorming → writing-plans → pace-bridge（plan 转 CHG）→ auto-APPROV
 
 ### 12 类 Hook 事件覆盖完整生命周期
 
+> Claude Code 注册面（`hooks/hooks.json`）。Codex CLI 注册面（`hooks/hooks.codex.json`）是其子集：SessionStart / UserPromptSubmit / PreToolUse（`apply_patch|Bash|mcp__paceflow__.*`）/ PostToolUse（`apply_patch`）/ Stop / PreCompact / SessionEnd——Codex 无 Notification / PostToolUseFailure / StopFailure，SubagentStart/SubagentStop 在 Codex 子代理内不触发故未注册（见 [REFERENCE §5.2](REFERENCE.md#52-codex-cli-宿主)）。
+
 | Hook | 触发时机 | 做什么 |
 |------|----------|--------|
 | **SessionStart** | 会话开始 / Compact 后 | 注入索引活跃区 + 活跃 CHG 摘要 |
@@ -264,14 +266,20 @@ PACEflow 分两层检测项目是否需要 PACE 流程。**强信号自动激活
 paceflow/
 ├── .claude-plugin/marketplace.json   # Marketplace 入口；source 指向 ./plugin
 ├── plugin/                           # 发布运行时根目录
-│   ├── .claude-plugin/plugin.json    #   Plugin 元数据
+│   ├── .claude-plugin/plugin.json    #   Plugin 元数据（Claude Code 读）
+│   ├── .codex-plugin/plugin.json     #   Codex CLI manifest（hooks→hooks.codex.json，mcpServers→mcp/）
+│   ├── mcp/                          #   Codex 宿主 artifact 写入 MCP server（零依赖 JSON-RPC）
+│   │   ├── paceflow-server.js        #     工具：get_context/reserve_artifact_id/create_chg/update_chg/close_chg/archive_chg/record_finding
+│   │   └── lib/                      #     context（session/cwd 解析）/ writer-pipeline（经真 hook 写盘）/ artifact-ops（确定性生成器）
 │   ├── agents/                       #   Artifact writer agent
 │   │   └── artifact-writer.md
 │   ├── agent-references/             #   Agent 运行规范与 instruction contracts
 │   │   ├── artifact-writer-spec.md
 │   │   └── instructions/
 │   ├── hooks/                        #   Hook 注册脚本 + helper + 公共工具
-│   │   ├── hooks.json                #     自动注册配置
+│   │   ├── hooks.json                #     自动注册配置（Claude Code）
+│   │   ├── hooks.codex.json          #     Codex CLI 注册面（每条经 codex-adapter.js 转发真 hook）
+│   │   ├── codex-adapter.js          #     Codex 宿主适配层：apply_patch/MCP 调用/输出形态翻译
 │   │   ├── pace-utils.js             #     公共工具库
 │   │   ├── pace-utils/               #     公共工具子模块
 │   │   ├── pre-tool-use.js           #     写代码前：任务检查 + 审批检查
@@ -375,7 +383,7 @@ paceflow/
 
 ## Subagent / Agent Teams 兼容性
 
-**Subagent**（Task / Agent 工具）：共享 hooks，工具调用全部过 PACEflow 门（写码门 / artifact 保护对 subagent 同样生效）。宿主 v2.1.232 起派遣默认 background、结果以通知回流；artifact-writer 写状态机标记或取编号的 op（create / approve / verify / review / close）必须逐次 fresh spawn 派遣，详见 REFERENCE。
+**Subagent**（Task / Agent 工具）：共享 hooks，工具调用全部过 PACEflow 门（写码门 / artifact 保护对 subagent 同样生效）。**Codex CLI 例外**：Codex 子代理内 hooks 不触发（宿主未提供 subagent-aware hooks），子代理写码不受门约束，MVP 发布面已明示；Codex 上也没有 artifact-writer 子代理，改由 MCP server 写入。宿主 v2.1.232 起派遣默认 background、结果以通知回流；artifact-writer 写状态机标记或取编号的 op（create / approve / verify / review / close）必须逐次 fresh spawn 派遣，详见 REFERENCE。
 
 **Agent Teams**：独立平级进程（≠ subagent 的主进程内子调用），各自加载 hooks。定位 **teammate = 纯执行者**，任务管理（批准 / 建 CHG / 改状态 / 归档）归主 session 单一权威源。`isTeammate()` 自动检测后：
 - **流程引导类** deny（artifact-root 选择、native plan 桥接——需主 session 交互完成）→ 降级为 HINT（避免死锁 teammate）

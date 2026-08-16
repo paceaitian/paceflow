@@ -10,7 +10,7 @@
 
 PACEflow keeps coding agents on a verifiable engineering workflow during long, stateful tasks. It enforces workflow transitions at tool boundaries, persists task state outside the model context, and restores that state across sessions and context compaction.
 
-PACEflow is currently implemented as a **Claude Code plugin**, while its underlying reliability model—deterministic gates, persistent artifacts, verification, and review—addresses problems common to long-running coding agents.
+PACEflow ships as a **Claude Code plugin** that also installs into **OpenAI Codex CLI** (same plugin directory, same hook scripts, artifact writes via a bundled MCP server on Codex — see [Codex CLI (MVP)](#codex-cli-mvp)). Its underlying reliability model—deterministic gates, persistent artifacts, verification, and review—addresses problems common to long-running coding agents.
 
 ## Why PACEflow?
 
@@ -40,7 +40,7 @@ The model still plans, implements, verifies, and reviews the code. A PACEflow ga
 | Across sessions | Active change state and relevant project memory are restored on startup, resume, and compaction. |
 | During record-keeping | A dedicated `artifact-writer` maintains structured artifacts, reducing record-keeping in the main coding context. |
 
-The current implementation uses Claude Code hooks, so the gates run at tool boundaries rather than depending only on prompt compliance.
+The current implementation uses the host's lifecycle hooks (Claude Code hooks; Codex CLI hooks through a thin host adapter), so the gates run at tool boundaries rather than depending only on prompt compliance.
 
 ## The PACE lifecycle
 
@@ -62,7 +62,7 @@ Plan → Artifact → Check → Execute → Verify → Review → Close
 
 ## Installation
 
-PACEflow currently requires **Claude Code 2.1.218 or newer**. Two hard dependencies: the hook manifest uses the `hooks[].args` execution form (introduced in 2.1.139), and it registers the `SubagentStart` hook event (earliest version verified to support it: 2.1.218). **A host that does not recognize any event name in a plugin's hooks.json silently drops the plugin's entire hook set** (verified empirically) — on older hosts every PACEflow gate would fail without any warning.
+On Claude Code, PACEflow requires **Claude Code 2.1.218 or newer** (Codex CLI: see [below](#codex-cli-mvp)). Two hard dependencies: the hook manifest uses the `hooks[].args` execution form (introduced in 2.1.139), and it registers the `SubagentStart` hook event (earliest version verified to support it: 2.1.218). **A host that does not recognize any event name in a plugin's hooks.json silently drops the plugin's entire hook set** (verified empirically) — on older hosts every PACEflow gate would fail without any warning.
 
 Run these commands inside Claude Code:
 
@@ -182,7 +182,7 @@ Git worktrees and Claude Code worktrees share PACEflow artifacts and runtime sta
 
 ## Runtime scope and trust boundary
 
-The released implementation targets **Claude Code** because its hook lifecycle exposes the boundaries PACEflow needs. The broader model—persistent workflow state, deterministic tool gates, human approval, verification, review, and session recovery—can be evaluated on other coding-agent runtimes only where equivalent lifecycle controls exist.
+The released implementation targets **Claude Code** and, as an MVP, **OpenAI Codex CLI** — both expose the lifecycle hooks PACEflow needs (Codex implements the same hook protocol; the differences are handled by `hooks/codex-adapter.js`, and Codex lacks subagent-aware hooks, so on Codex the artifact writer is an MCP server rather than a subagent). The broader model—persistent workflow state, deterministic tool gates, human approval, verification, review, and session recovery—can be evaluated on other coding-agent runtimes only where equivalent lifecycle controls exist.
 
 PACEflow is not:
 
@@ -206,7 +206,7 @@ node tests/run-all.js
 
 The aggregate runner also performs Claude plugin validation and `git diff --check`. For focused iteration, set `PACE_TEST_FILTER` to a suite-name substring before running the same command.
 
-The runtime published through the Claude Code marketplace lives under `plugin/`. Repository maintenance material, tests, and historical design documents live under `tests/`, `docs/`, and `internal/`.
+The runtime published through the Claude Code marketplace lives under `plugin/` (Codex reads the same directory through `plugin/.codex-plugin/plugin.json`). Repository maintenance material, tests, and historical design documents live under `tests/`, `docs/`, and `internal/` — the Codex port research and acceptance records are in `docs/research-2026-08-15-codex-port-feasibility.md` and `docs/research/codex-port/`.
 
 ## Documentation
 
