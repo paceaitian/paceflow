@@ -1,6 +1,6 @@
 {
   "name": "paceflow",
-  "version": "7.2.32",
+  "version": "7.3.0",
   "description": "PACE workflow enforcement system — Plan-Artifact-Check-Execute-Verify-Review protocol with hooks (Codex CLI manifest; artifact writes via the bundled paceflow MCP server)",
   "author": { "name": "paceaitian" },
   "homepage": "https://github.com/paceaitian/paceflow",

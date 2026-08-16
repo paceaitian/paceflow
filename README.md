@@ -108,7 +108,7 @@ codex plugin add paceflow@paceaitian-paceflow
 
 Verified: `codex plugin add` reports `Installed plugin root: …/paceflow/<version>`, `codex mcp list` shows the `paceflow` server, and a `codex exec` turn prints `hook: SessionStart Completed`.
 
-MVP scope on Codex: the write gate on `apply_patch`/Bash, the Stop gate, SessionStart/UserPromptSubmit injection, and the MCP tools `get_context` / `reserve_artifact_id` / `create_chg` / `update_chg` (approve, approve-and-start, update-status, append, verify, review) / `close_chg` / `record_finding`. Not covered yet: `archive-chg`, `update-finding`, `record-correction`, `update-index`, batch create — and, as a host limitation, file writes made inside Codex subagents are not gated. Details in the [reference manual](REFERENCE.md#52-codex-cli-宿主).
+MVP scope on Codex: the write gate on `apply_patch`/Bash, the Stop gate, SessionStart/UserPromptSubmit injection, and the MCP tools `get_context` / `reserve_artifact_id` / `create_chg` / `update_chg` (approve, approve-and-start, update-status, append, verify, review) / `close_chg` / `archive_chg` / `record_finding`. Not covered yet: `update-finding`, `record-correction`, `update-index`, batch create — and, as a host limitation, file writes made inside Codex subagents are not gated. Details in the [reference manual](REFERENCE.md#52-codex-cli-宿主).
 
 ## Quick start
 

@@ -146,11 +146,12 @@ PACEflow 也运行在 OpenAI Codex CLI 上（同一插件目录，经 `.codex-pl
   | `update-chg action=approve-and-start …` | `update_chg {target, action:"approve-and-start", task_id, approval_confirmed:true, approval_source, approval_evidence}` |
   | `update-chg action=approve / update-status / append / verify / review` | `update_chg {target, action, …同名字段}` |
   | `close-chg …` | `close_chg {target, verification_confirmed:true, complete_open_tasks:true, review_confirmed:true, review_source, review_findings, verify_summary, implementation_notes, walkthrough_summary}` |
+  | `archive-chg …`（已 verified 单独归档 / 取消式归档） | `archive_chg {target, walkthrough_summary}` |
   | `record-finding` | `record_finding {title, summary, type, impact, body[, status, rejection_reason, related_changes]}` |
   | 不知道当前 CHG-ID / artifact 目录 | `get_context {}`（只读） |
 
 - 每次 MCP 调用先经 PreToolUse 派遣门（与 Claude 侧 artifact-writer 派遣门同一套校验，deny 文案相同），server 内每个文件写入再以 artifact-writer 身份过写入门；产物形态与 artifact-writer 逐段同构。
-- **MVP 未覆盖**：`archive-chg` / `update-finding` / `record-correction` / `update-index` 与 batch create（`change-set-total>1`）——server 返回 `not-implemented`，请逐条调用或改到 Claude Code 宿主完成。
+- **MVP 未覆盖**：`update-finding` / `record-correction` / `update-index` 与 batch create（`change-set-total>1`）——server 返回 `not-implemented`，请逐条调用或改到 Claude Code 宿主完成。
 - 无 SendMessage resume 编排、无 Workflow；需要用户确认时用 Codex 自身的提问方式，批准证据仍写进 `approval_evidence`。
 - 写码门覆盖 `apply_patch`（Codex 唯一文件写入工具）与 Bash；**Codex 子代理内的写入不受门约束（宿主限制）**，不要把写代码委托给子代理。
 
