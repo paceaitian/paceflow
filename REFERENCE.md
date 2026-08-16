@@ -224,7 +224,7 @@ PreToolUse 的拒绝分三档。**teammate 模式（`CLAUDE_CODE_TEAM_NAME` 非�
 
 ## 5.2 Codex CLI 宿主
 
-同一插件目录也能被 OpenAI Codex CLI 安装（`.codex-plugin/plugin.json`；codex-cli 0.147.0 / Linux 一手实测，**Windows 未验证**——Codex 的 command 型 hook 经 `$SHELL -lc` 执行，`${CLAUDE_PLUGIN_ROOT}` 靠 shell 展开，Windows 上是否需要 `commandWindows` 待实测）。
+同一插件目录也能被 OpenAI Codex CLI 安装（`.codex-plugin/plugin.json`；codex-cli 0.147.0 在 Linux 与 Windows 上均一手实测完整闭环——Windows 上 `${CLAUDE_PLUGIN_ROOT}` 同样被展开，无需 `commandWindows`；但 Windows Codex 不认「exit 2 + stderr」阻断形态，adapter 统一翻译成 JSON `decision:block` / `permissionDecision:deny`，实测记录见 `docs/research/codex-port/mvp-windows-acceptance-2026-08-16.md`）。
 
 | 组件 | 位置 | 作用 |
 |------|------|------|

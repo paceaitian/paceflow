@@ -91,7 +91,7 @@ The choice is persisted in `.pace/artifact-root`. Headless environments can set 
 
 ### Codex CLI (MVP)
 
-PACEflow also installs into OpenAI Codex CLI (verified on codex-cli 0.147.0 on Linux; **Windows not yet verified**). Codex reads the same plugin directory through `.codex-plugin/plugin.json`: hooks are registered from `hooks/hooks.codex.json` — every entry runs `hooks/codex-adapter.js`, which translates Codex events (`apply_patch`, MCP tool calls, plain-text output) for the shared hook scripts, so the gate logic is the same code — and artifact writes go through the bundled `paceflow` MCP server instead of the `artifact-writer` subagent (Codex subagent prompts are opaque to hooks and hooks do not fire inside subagents).
+PACEflow also installs into OpenAI Codex CLI (verified end-to-end on codex-cli 0.147.0 on Linux and Windows). Codex reads the same plugin directory through `.codex-plugin/plugin.json`: hooks are registered from `hooks/hooks.codex.json` — every entry runs `hooks/codex-adapter.js`, which translates Codex events (`apply_patch`, MCP tool calls, plain-text output) for the shared hook scripts, so the gate logic is the same code — and artifact writes go through the bundled `paceflow` MCP server instead of the `artifact-writer` subagent (Codex subagent prompts are opaque to hooks and hooks do not fire inside subagents).
 
 ```text
 codex plugin marketplace add paceaitian/paceflow

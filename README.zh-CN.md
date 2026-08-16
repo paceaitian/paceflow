@@ -75,7 +75,7 @@ CHG/HOTFIX 是连续执行、可验证、可关闭的最小变更单元，不是
 
 ### Codex CLI（MVP）
 
-PACEflow 也能装进 OpenAI Codex CLI（codex-cli 0.147.0 / Linux 一手实测；**Windows 尚未验证**）。Codex 读同一个插件目录里的 `.codex-plugin/plugin.json`：hook 从 `hooks/hooks.codex.json` 注册——每条都经 `hooks/codex-adapter.js` 把 Codex 事件（`apply_patch`、MCP 工具调用、纯文本输出）翻译给与 Claude Code 共用的 hook 脚本，门逻辑是同一份代码；artifact 写入不派 `artifact-writer` 子代理，改走插件自带的 `paceflow` MCP server（Codex 子代理 prompt 对 hook 不可读、子代理内 hooks 不触发）。
+PACEflow 也能装进 OpenAI Codex CLI（codex-cli 0.147.0，Linux 与 Windows 均一手实测完整闭环）。Codex 读同一个插件目录里的 `.codex-plugin/plugin.json`：hook 从 `hooks/hooks.codex.json` 注册——每条都经 `hooks/codex-adapter.js` 把 Codex 事件（`apply_patch`、MCP 工具调用、纯文本输出）翻译给与 Claude Code 共用的 hook 脚本，门逻辑是同一份代码；artifact 写入不派 `artifact-writer` 子代理，改走插件自带的 `paceflow` MCP server（Codex 子代理 prompt 对 hook 不可读、子代理内 hooks 不触发）。
 
 ```bash
 codex plugin marketplace add paceaitian/paceflow
