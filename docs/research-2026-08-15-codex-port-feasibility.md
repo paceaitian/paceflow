@@ -85,6 +85,22 @@
 - **完整移植需先解决**:交互模式子代理 hooks 触发复测(决定 artifact-writer 路线);若仍零触发,走 MCP 参数化路线重做 artifact 写入层(工作量中等,但反而更确定性)。
 - **不建议**:为 Codex 维护第二套 hook 源码——现有 hooks 零改动可跑,差异集中在一个适配层 + tool 名映射表,应做成同一代码库的 host adapter(检测 `hook_event_name` 存在 `model`/`turn_id` 字段即 Codex)。
 
+## 生态与先例(详见 `docs/research/codex-port/ecosystem-precedents-2026-08-15.md`)
+
+- Codex 原生 `/import`(v0.128+)可机械搬 hooks(仅同步 command 型)/ skills / subagents(md→toml)/ MCP / sessions,但作者明言「移植操作合约而非文件树」——PACEflow 的价值层(派遣门协议、唯一写入路径、V→R 偏序)正是不保证的部分。
+- 社区先例(cc2codex / plugin-claude-2-codex / 多篇迁移文)共识:Claude 应用层 hook 治理 vs Codex 内核级 sandbox,「hooks 验证命令」类在 Codex 被视为由 sandbox_mode 替代——PACEflow 的确定性门定位在 Codex 生态属差异化。
+- [openai/codex#16226](https://github.com/openai/codex/issues/16226)(仍 open):hooks 区分子代理事件的诉求——与 E5 实测互证,subagent-aware hooks 在 Codex 尚无可靠基础。
+
+## 最终结论(三层 + 一句话)
+
+| 层 | 可移植度 | 一手依据 |
+|---|---|---|
+| hooks 内核(写码门/Stop 门/注入) | **~85%** | 事件层零改实测触发;handler 三处机械转换(args 合并 / stdout 包 JSON / apply_patch 路径解析);写码门 DENY_V6_NO_ACTIVE 在 Codex 真实生效(E4);deny 位于审批链最外层不受 Guardian 影响 |
+| skill / 指令层 | **~90%** | 4 skill 零改被发现;仅正文 Claude 专有工具名需改写 |
+| subagent 层(artifact-writer) | **~30-60%** | 能定义派遣(TOML);但 prompt 加密、无工具白名单、子代理内 hooks exec 零触发——PACEflow「确定性网关 > LLM-soft」内核的一半在此层退化为软指令,需重设计(MCP 参数化 / 落盘门交叉判断) |
+
+**一句话**:PACEflow 的两个防遗忘硬门 + 上下文注入可以以很低成本移植到 Codex(已实证跑通);它的 artifact 写入隔离保证在 Codex 当前版本没有可靠基础,要么接受降级(主线程直写 + 落盘门),要么走 MCP 参数化重做该层。**MVP 值得做,完整移植等 Codex subagent-aware hooks 成熟(issue #16226)。**
+
 ## 未定锚 / 待补
 
 - 交互模式(非 exec)下 SubagentStart/SubagentStop/子代理内 PreToolUse 是否触发(官方文档写会触发,exec 实测不触发)
