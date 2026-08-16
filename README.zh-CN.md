@@ -78,11 +78,19 @@ Claude Code 请使用 `2.1.218` 或更高版本（Codex CLI 见下方「Codex CL
 PACEflow 也能装进 OpenAI Codex CLI（codex-cli 0.147.0，Linux 与 Windows 均一手实测完整闭环）。Codex 读同一个插件目录里的 `.codex-plugin/plugin.json`：hook 从 `hooks/hooks.codex.json` 注册——每条都经 `hooks/codex-adapter.js` 把 Codex 事件（`apply_patch`、MCP 工具调用、纯文本输出）翻译给与 Claude Code 共用的 hook 脚本，门逻辑是同一份代码；artifact 写入不派 `artifact-writer` 子代理，改走插件自带的 `paceflow` MCP server（Codex 子代理 prompt 对 hook 不可读、子代理内 hooks 不触发）。
 
 ```bash
+# 1. 注册 marketplace（Codex 直接读仓库根的 .claude-plugin/marketplace.json，与 Claude 同一份）
 codex plugin marketplace add paceaitian/paceflow
+# 2. 安装插件（拷贝到 $CODEX_HOME/plugins/cache/paceaitian-paceflow/paceflow/<version>/）
 codex plugin add paceflow@paceaitian-paceflow
+# 3. 在 Codex 里执行 /hooks，审阅并信任 PACEflow 的 hook（非托管 hook 未信任前会被跳过；
+#    自动化脚本可用 codex exec --dangerously-bypass-hook-trust），然后开新线程生效
+# 4. 每个项目按 SessionStart 注入里的 helper 启用，例如
+#    node "<插件根>/hooks/set-artifact-root.js" --choice local   （或 --choice vault）
+# 升级：codex plugin marketplace upgrade && codex plugin add paceflow@paceaitian-paceflow
+# 卸载：codex plugin remove paceflow@paceaitian-paceflow
 ```
 
-装完在 Codex 里用 `/hooks` 审阅并信任 hook（自动化可加 `--dangerously-bypass-hook-trust`），开新线程生效；每个项目仍按 SessionStart 注入里的 helper 启用（`set-artifact-root.js --choice local|vault`）。
+装好的判据：`codex plugin add` 打印 `Installed plugin root: …/paceflow/<version>`；`codex mcp list` 能看到 `paceflow` server；任意一轮 `codex exec` 输出 `hook: SessionStart Completed`。
 
 Codex MVP 覆盖：写码门（`apply_patch`/Bash）、Stop 门、SessionStart/UserPromptSubmit 注入，MCP 工具 `get_context` / `reserve_artifact_id` / `create_chg` / `update_chg`（approve / approve-and-start / update-status / append / verify / review）/ `close_chg` / `record_finding`。未覆盖：`archive-chg`、`update-finding`、`record-correction`、`update-index`、batch create；以及宿主限制——Codex 子代理内的文件写入不受门约束。细节见 [REFERENCE](REFERENCE.md#52-codex-cli-宿主)。
 

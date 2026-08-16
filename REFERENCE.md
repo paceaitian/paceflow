@@ -249,6 +249,17 @@ PreToolUse 的拒绝分三档。**teammate 模式（`CLAUDE_CODE_TEAM_NAME` 非�
 
 > 需 Claude Code `2.1.218` 或更高版本。两个硬依赖：① `hooks[].args` exec form（`2.1.139` 引入，更早版本只执行 `command: "node"` 不传脚本路径）；② `SubagentStart` hook 事件（存在性已实测的最早版本 `2.1.218`）——宿主对插件 hooks.json 里不认识的事件名会**整份静默丢弃该插件全部 hooks**（2026-08-14 三臂对照实测），旧宿主上所有门无提示失效（最隐蔽的失效模式）。与 README 安装要求同源。
 
+Codex CLI（同一仓库 / 同一 marketplace.json）：
+
+```text
+codex plugin marketplace add paceaitian/paceflow        # 也可给本地路径或 owner/repo@ref
+codex plugin add paceflow@paceaitian-paceflow          # 拷贝到 $CODEX_HOME/plugins/cache/paceaitian-paceflow/paceflow/<version>/
+# Codex 内 /hooks 审阅并信任 hook → 开新线程；项目内用 set-artifact-root.js 启用
+# 升级：codex plugin marketplace upgrade && codex plugin add paceflow@paceaitian-paceflow；卸载：codex plugin remove paceflow@paceaitian-paceflow
+```
+
+> Codex 插件缓存按 version 目录存放，同版本重装会覆盖；本地开发迭代时给 `.codex-plugin/plugin.json` 的 version 加 `+codex.<cachebuster>` 后缀可强制换目录（Codex 官方 plugin-creator 约定）。若上一次 `codex exec` 进程仍在跑，重装会因文件占用失败（os error 5/32），先结束该进程。
+
 安装后应包含：
 - `hooks/`
 - `skills/`

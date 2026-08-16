@@ -94,11 +94,19 @@ The choice is persisted in `.pace/artifact-root`. Headless environments can set 
 PACEflow also installs into OpenAI Codex CLI (verified end-to-end on codex-cli 0.147.0 on Linux and Windows). Codex reads the same plugin directory through `.codex-plugin/plugin.json`: hooks are registered from `hooks/hooks.codex.json` — every entry runs `hooks/codex-adapter.js`, which translates Codex events (`apply_patch`, MCP tool calls, plain-text output) for the shared hook scripts, so the gate logic is the same code — and artifact writes go through the bundled `paceflow` MCP server instead of the `artifact-writer` subagent (Codex subagent prompts are opaque to hooks and hooks do not fire inside subagents).
 
 ```text
+# 1. Register the marketplace (Codex reads the same .claude-plugin/marketplace.json at the repo root)
 codex plugin marketplace add paceaitian/paceflow
+# 2. Install the plugin (copied into $CODEX_HOME/plugins/cache/paceaitian-paceflow/paceflow/<version>/)
 codex plugin add paceflow@paceaitian-paceflow
+# 3. Inside Codex: /hooks → review and trust the PACEflow hooks (non-managed hooks are skipped until trusted;
+#    automation can pass `codex exec --dangerously-bypass-hook-trust`), then start a new thread.
+# 4. Per project: run the helper printed by the SessionStart injection, e.g.
+#    node "<plugin-root>/hooks/set-artifact-root.js" --choice local     (or --choice vault)
+# Upgrade: codex plugin marketplace upgrade && codex plugin add paceflow@paceaitian-paceflow
+# Uninstall: codex plugin remove paceflow@paceaitian-paceflow
 ```
 
-Then review and trust the hooks with `/hooks` (automation can pass `--dangerously-bypass-hook-trust`) and start a new thread. Enable PACEflow per project with the helper the SessionStart hook prints (`set-artifact-root.js --choice local|vault`).
+Verified: `codex plugin add` reports `Installed plugin root: …/paceflow/<version>`, `codex mcp list` shows the `paceflow` server, and a `codex exec` turn prints `hook: SessionStart Completed`.
 
 MVP scope on Codex: the write gate on `apply_patch`/Bash, the Stop gate, SessionStart/UserPromptSubmit injection, and the MCP tools `get_context` / `reserve_artifact_id` / `create_chg` / `update_chg` (approve, approve-and-start, update-status, append, verify, review) / `close_chg` / `record_finding`. Not covered yet: `archive-chg`, `update-finding`, `record-correction`, `update-index`, batch create — and, as a host limitation, file writes made inside Codex subagents are not gated. Details in the [reference manual](REFERENCE.md#52-codex-cli-宿主).
 
