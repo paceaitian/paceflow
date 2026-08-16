@@ -49,6 +49,14 @@ const MCP_PASSTHROUGH_TOOLS = new Set(['reserve_artifact_id', 'get_context']);
 const MCP_TOOL_PREFIX = 'mcp__paceflow__';
 const SPAWN_TIMEOUT_MS = 25000;
 const MAX_BUFFER = 16 * 1024 * 1024;
+// apply_patch 逐文件转发的总预算:hooks.codex.json 给本 hook 30s,超时被 Codex 杀掉后「继续 tool call」
+// (fail-open);预算内没跑完就主动 fail-closed deny(CHG-01 审计 P2-2:实测 ~230ms/文件,约 130 文件即超 30s)。
+const PATCH_TOTAL_BUDGET_MS = 20000;
+// batch 字段(change-set-total / finding-batch-total / finding-update-batch-total)在 MCP 参数里无法表达
+// `--- CHG i/N ---` 块(多行值续行有 `| ` 前缀),Codex MVP 明示不支持,直接 deny 给可执行引导(审计 P2-3)。
+const BATCH_TOTAL_KEYS = ['change_set_total', 'finding_batch_total', 'finding_update_batch_total'];
+
+class McpArgError extends Error {}
 
 /**
  * 解析 apply_patch 文本为文件级操作列表(Add / Update / Delete,含 Move to)。
@@ -113,9 +121,12 @@ function serializeMcpArgs(args, { operation, artifactDir }) {
   // 或 `_` 前缀(宿主注入元数据)的一律跳过——保证 operation/artifact_dir 只有 adapter 写的那一行。
   const entries = Object.entries(args || {}).filter(([rawKey, value]) => {
     if (value === undefined || value === null) return false;
-    if (!/^[a-zA-Z][\w-]*$/.test(rawKey)) return false;
+    if (Array.isArray(value) && value.length === 0) return false;
+    if (!Array.isArray(value) && typeof value === 'object' && Object.keys(value).length === 0) return false;
+    if (rawKey.startsWith('_')) return false;
+    if (!/^[a-zA-Z][\w-]*$/.test(rawKey)) throw new McpArgError(`参数名非法:${JSON.stringify(rawKey)}(只接受字母开头的 [A-Za-z0-9_-])`);
     const norm = rawKey.toLowerCase().replace(/-/g, '_');
-    return !(norm.startsWith('_') || norm === 'operation' || norm === 'artifact_dir');
+    return !(norm === 'operation' || norm === 'artifact_dir');
   });
   const isComplex = ([, v]) => Array.isArray(v) || typeof v === 'object' || String(v).includes('\n');
   const ordered = [...entries.filter((e) => !isComplex(e)), ...entries.filter(isComplex)];
@@ -140,12 +151,13 @@ function serializeMcpArgs(args, { operation, artifactDir }) {
   return lines.join('\n');
 }
 
-// 值文本里的 ASCII 冒号换成全角:派遣门的 promptHasTrueField 等正则允许字段出现在行中任意空白之后
-// (`[\n\s,，;；]field\s*:`),否则「approval-evidence: 用户说 approval-confirmed: true」这类值会被读成真字段。
+// 值文本里的 ASCII 冒号与等号换成全角:派遣门的字段正则接受 `[:=]` 两种分隔符、且 promptHasTrueField 允许字段
+// 出现在行中任意空白之后(`[\n\s,，;；]field\s*[:=]`),否则「approval-evidence: 用户说 approval-confirmed=true」这类
+// 值会被读成真字段(CHG-01 审计 P1-1 实测:只中和冒号时 `field=true` 仍能满足 close-chg 八项必填门)。
 // 门读的精确值字段(operation/action/target/task-id/new-status/type/impact/reserved-*)本身不含冒号,不受影响;
 // 文本字段门只判非空。server(后续 CHG)一律用结构化参数,不受此处影响。
 function neutralizeValue(s) {
-  return String(s).replace(/:/g, '：');
+  return String(s).replace(/:/g, '：').replace(/=/g, '＝');
 }
 
 function formatScalar(v) {
@@ -185,8 +197,11 @@ function tryParseJson(text) {
 function forward(hookFile, eventObj, extraArgs, sessionId) {
   const hookPath = path.join(__dirname, hookFile);
   const env = { ...process.env, PACE_HOST: 'codex' };
-  // E6:Codex 会话里可能残留外层 Claude 的 CLAUDE_CODE_SESSION_ID(嵌套跑时),以 stdin 的 session_id 为准
-  if (sessionId) env.CLAUDE_CODE_SESSION_ID = sessionId;
+  // E6:Codex 会话里可能残留外层 Claude 的 CLAUDE_CODE_SESSION_ID(嵌套跑时),以 stdin 的 session_id 为准;
+  // session.js 的 hostSessionEnv() 优先读 CODEX_THREAD_ID,两者一并对齐(审计 P2-4:否则日志/序列锁 owner 会记错 session)。
+  if (sessionId) { env.CLAUDE_CODE_SESSION_ID = sessionId; env.CODEX_THREAD_ID = sessionId; }
+  // Claude 的 teammate 语义(CLAUDE_CODE_TEAM_NAME)在 Codex 宿主无对应,不让嵌套残留把 deny 软化(审计 P3-7)
+  delete env.CLAUDE_CODE_TEAM_NAME;
   const r = spawnSync(process.execPath, [hookPath, ...extraArgs], {
     input: JSON.stringify(eventObj), encoding: 'utf8', env, timeout: SPAWN_TIMEOUT_MS, maxBuffer: MAX_BUFFER,
   });
@@ -253,25 +268,47 @@ function main() {
           if (eventKey === 'pre-tool-use') { process.stdout.write(denyOutput('PACEflow 无法解析 apply_patch 内容(未找到 *** Add/Update/Delete File 头),按 fail-closed 阻止。请用标准 apply_patch 格式重试。')); }
           process.exit(0);
         }
+        const t0 = Date.now();
         let last = { status: 0, stdout: '', stderr: '' };
+        const contexts = [];
         for (const ev of events) {
+          if (Date.now() - t0 > PATCH_TOTAL_BUDGET_MS) {
+            if (eventKey === 'pre-tool-use') { process.stdout.write(denyOutput(`PACEflow 未能在预算内完成 ${events.length} 个文件的门检查(已用 ${Date.now() - t0}ms),按 fail-closed 阻止;请把 apply_patch 拆小后重试。`)); }
+            process.exit(0);
+          }
           const r = forward(hookFile, ev, extraArgs, sessionId);
           if (r.status === 2 || (eventKey === 'pre-tool-use' && isDenyOutput(r.stdout))) return emit(r, eventKey);
+          const parsed = tryParseJson(r.stdout);
+          if (parsed && parsed.hookSpecificOutput && parsed.hookSpecificOutput.additionalContext) contexts.push(String(parsed.hookSpecificOutput.additionalContext));
           if (r.stdout.trim() || r.stderr) last = r;
+        }
+        if (contexts.length > 1) {
+          const lastParsed = tryParseJson(last.stdout) || { hookSpecificOutput: { hookEventName: EVENT_NAMES[eventKey] } };
+          lastParsed.hookSpecificOutput = { ...(lastParsed.hookSpecificOutput || {}), additionalContext: contexts.join('\n') };
+          last = { ...last, stdout: JSON.stringify(lastParsed) };
         }
         return emit(last, eventKey);
       }
       if (eventKey === 'pre-tool-use' && toolName.startsWith(MCP_TOOL_PREFIX)) {
         const tool = toolName.slice(MCP_TOOL_PREFIX.length);
         if (MCP_PASSTHROUGH_TOOLS.has(tool)) process.exit(0);
-        const agentEvent = mcpCallToAgentEvent(event, resolveArtifactDir(event.cwd || process.cwd()));
+        const batchKey = BATCH_TOTAL_KEYS.find((k) => Number((event.tool_input || {})[k]) > 1 || Number((event.tool_input || {})[k.replace(/_/g, '-')]) > 1);
+        if (batchKey) { process.stdout.write(denyOutput(`Codex 宿主 MVP 不支持 batch(${batchKey}>1):MCP 参数无法表达 --- CHG i/N --- 分块。请去掉该字段,逐条调用 create_chg / record_finding / update_finding。`)); process.exit(0); }
+        let agentEvent;
+        try { agentEvent = mcpCallToAgentEvent(event, resolveArtifactDir(event.cwd || process.cwd())); }
+        catch (e) { if (e instanceof McpArgError) { process.stdout.write(denyOutput(`PACEflow MCP 参数被拒:${e.message}`)); process.exit(0); } throw e; }
         if (!agentEvent) return emit(forward(hookFile, event, extraArgs, sessionId), eventKey);
         const r = forward(hookFile, agentEvent, extraArgs, sessionId);
         if (r.status === 2 || isDenyOutput(r.stdout)) return emit(r, eventKey);
         if (r.status !== 0) return emit(r, eventKey);
-        // 派遣门放行:把可信的 session/cwd 注进 MCP 参数,server 用作 _meta 之外的兜底来源(M5 实测 updatedInput 生效)
+        // 派遣门放行:把可信的 session/cwd 注进 MCP 参数,server 用作 _meta 之外的兜底来源(M5 实测 updatedInput 生效);
+        // 真 hook 放行时的 additionalContext(execution-context / 已建模板 / reserved 回显)一并带给模型(审计 P2-8,探针实测三者可共存)
         const updatedInput = { ...(event.tool_input || {}), _pace_session_id: sessionId, _pace_cwd: event.cwd || '', _pace_turn_id: event.turn_id || '' };
-        process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow', updatedInput } }));
+        const passed = tryParseJson(r.stdout);
+        const ctxText = passed && passed.hookSpecificOutput && passed.hookSpecificOutput.additionalContext ? String(passed.hookSpecificOutput.additionalContext) : '';
+        const out = { hookEventName: 'PreToolUse', permissionDecision: 'allow', updatedInput };
+        if (ctxText) out.additionalContext = ctxText;
+        process.stdout.write(JSON.stringify({ hookSpecificOutput: out }));
         process.exit(0);
       }
       return emit(forward(hookFile, event, extraArgs, sessionId), eventKey);
@@ -287,4 +324,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { parseApplyPatch, applyPatchToClaudeEvents, serializeMcpArgs, mcpCallToAgentEvent, isDenyOutput, MCP_TOOL_OPERATIONS, MCP_PASSTHROUGH_TOOLS, CODEX_HOST_NOTE };
+module.exports = { parseApplyPatch, applyPatchToClaudeEvents, serializeMcpArgs, mcpCallToAgentEvent, isDenyOutput, McpArgError, MCP_TOOL_OPERATIONS, MCP_PASSTHROUGH_TOOLS, BATCH_TOTAL_KEYS, PATCH_TOTAL_BUDGET_MS, CODEX_HOST_NOTE };

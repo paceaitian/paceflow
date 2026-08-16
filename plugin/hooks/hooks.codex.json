@@ -5,8 +5,8 @@
       {
         "matcher": "startup|resume|clear|compact",
         "hooks": [
-          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/codex-adapter.js\" session-start --group core", "timeout": 30, "additionalContextLimit": 12000, "statusMessage": "PACEflow 注入项目上下文" },
-          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/codex-adapter.js\" session-start --group artifact", "timeout": 30, "additionalContextLimit": 12000, "statusMessage": "PACEflow 注入 artifact 摘要" }
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/codex-adapter.js\" session-start --group core", "timeout": 30, "additionalContextLimit": 8000, "statusMessage": "PACEflow 注入项目上下文" },
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/codex-adapter.js\" session-start --group artifact", "timeout": 30, "additionalContextLimit": 8000, "statusMessage": "PACEflow 注入 artifact 摘要" }
         ]
       }
     ],
