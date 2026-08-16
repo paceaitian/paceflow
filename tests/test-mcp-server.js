@@ -135,7 +135,8 @@ test('MS-E1 握手 + tools/list 稳定 + get_context 报 artifact_dir/空活跃�
   assert.deepStrictEqual(weird.out[1].result, {}, 'ping → {}');
   assert.strictEqual(weird.out[2].error.code, -32601, '未知 method → -32601');
   const ctx = sc(out[2]);
-  assert.strictEqual(path.resolve(ctx.artifact_dir), path.resolve(dir));
+  // macOS 的 os.tmpdir() 是 /var→/private/var 符号链接,server 侧 cwd 归一为 realpath(PR #6 CI)
+  assert.strictEqual(path.resolve(ctx.artifact_dir), fs.realpathSync(dir));
   assert.deepStrictEqual(ctx.active_changes, []);
 });
 
@@ -434,7 +435,7 @@ test('MS-E12 长驻进程缓存失效:同一 server 进程内先后两次 get_co
   try {
     server.handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'get_context', arguments: {}, _meta: meta(dir, 's-e12') } });
     const first = JSON.parse(captured.pop()).result.structuredContent.artifact_dir;
-    assert.strictEqual(path.resolve(first), path.resolve(dir));
+    assert.strictEqual(path.resolve(first), fs.realpathSync(dir));
     const sw = spawnSync(process.execPath, [path.join(PLUGIN, 'hooks', 'set-artifact-root.js'), '--choice', 'vault'], { cwd: dir, encoding: 'utf8', env: { ...process.env, CLAUDE_PROJECT_DIR: dir } });
     assert.strictEqual(sw.status, 0, sw.stdout + sw.stderr);
     server.handle({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'get_context', arguments: {}, _meta: meta(dir, 's-e12') } });
