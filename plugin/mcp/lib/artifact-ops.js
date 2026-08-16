@@ -260,7 +260,7 @@ function markerAfterOp(detail, anchorMarker, newMarker) {
 }
 
 /** 在某 `## 段` 末尾(下一个 `## ` 之前 / EOF)追加若干行 */
-function appendToSectionOp(detail, sectionTitle, newLines, { createIfMissing = false, afterSection = '' } = {}) {
+function appendToSectionOp(detail, sectionTitle, newLines, { createIfMissing = false, afterSection = '', blankLineBefore = false } = {}) {
   const nl = detail.content.includes('\r\n') ? '\r\n' : '\n';
   const content = detail.content;
   const headerRe = new RegExp(`^## ${escapeRe(sectionTitle)}[ \\t]*\\r?\\n`, 'm');
@@ -285,7 +285,8 @@ function appendToSectionOp(detail, sectionTitle, newLines, { createIfMissing = f
   const sectionEnd = next >= 0 ? start + next : content.length;
   const oldString = content.slice(h.index, sectionEnd);
   const trimmed = oldString.replace(/(\r?\n)+$/, '');
-  const newString = `${trimmed}${nl}${newLines.join(nl)}${nl}${next >= 0 ? nl : nl}`;
+  // 表格行紧接上一行;标题/段落类追加(如 ### T-NNN)与前文隔一空行
+  const newString = `${trimmed}${nl}${blankLineBefore ? nl : ''}${newLines.join(nl)}${nl}${nl}`;
   return { kind: 'edit', file: detail.path, oldString, newString };
 }
 
@@ -424,3 +425,268 @@ module.exports = {
   insertBeforeArchiveEdit, appendToSectionOp, approvedInsertOp, markerAfterOp, indexCheckboxOp, deriveStatusAfterTasks,
   fmSetOp, fmValue, fmIsNull, taskStatuses, findTaskLine, normalizeId, idKind, idAlias, APPROVED, VERIFIED, REVIEWED, ARCHIVE_MARKER,
 };
+
+// ---------------------------------------------------------------------------------------------
+// close-chg(CHG-20260815-03):一把梭 完成 → VERIFIED → REVIEWED → 归档 → walkthrough
+// ---------------------------------------------------------------------------------------------
+
+const PLACEHOLDER_LINE = '（各任务的实施说明在收口时由 `close-chg implementation-notes` 字段写入，中途可用 `update-chg section=implementation` append；create 阶段任务未实施，不在此预填占位符。）';
+
+function requireTrue(p, key, code = 'format-violation') {
+  if (p[key] === undefined || p[key] === null) throw new OpError('missing-fields', `missing-fields: ${key}`);
+  if (p[key] !== true && String(p[key]).toLowerCase() !== 'true') throw new OpError(code, `${key} 必须为 true`);
+}
+
+/** implementation_notes 归一:数组 "T-001: 文本" / 对象 {T-001: 文本} / 多行字符串 */
+function normalizeImplNotes(v) {
+  const out = [];
+  if (Array.isArray(v)) {
+    for (const item of v) {
+      if (item && typeof item === 'object') { for (const [k, t] of Object.entries(item)) out.push({ id: String(k).toUpperCase(), text: String(t).trim() }); continue; }
+      const m = String(item || '').match(/^\s*-?\s*(T-\d{3})\s*[:：]\s*([\s\S]*)$/);
+      if (m) out.push({ id: m[1].toUpperCase(), text: m[2].trim() });
+    }
+  } else if (v && typeof v === 'object') {
+    for (const [k, t] of Object.entries(v)) out.push({ id: String(k).toUpperCase(), text: String(t).trim() });
+  } else if (typeof v === 'string') {
+    for (const line of v.split(/\r?\n/)) {
+      const m = line.match(/^\s*-?\s*(T-\d{3})\s*[:：]\s*(.*)$/);
+      if (m) out.push({ id: m[1].toUpperCase(), text: m[2].trim() });
+    }
+  }
+  return out.filter((n) => n.text);
+}
+
+/**
+ * @returns {{ ops: WriteOp[], id: string, extra: string }}
+ */
+function buildCloseChg(ctx, p) {
+  requireTrue(p, 'verification_confirmed');
+  requireTrue(p, 'complete_open_tasks');
+  requireTrue(p, 'review_confirmed');
+  const reviewSource = String(p.review_source || '').trim();
+  const reviewFindings = String(p.review_findings || '').trim();
+  const verifySummary = String(p.verify_summary || '').trim();
+  const walkSummary = String(p.walkthrough_summary || '').trim();
+  const notes = normalizeImplNotes(p.implementation_notes);
+  const missing = [];
+  if (!reviewSource) missing.push('review_source');
+  if (!reviewFindings) missing.push('review_findings');
+  if (!verifySummary) missing.push('verify_summary');
+  if (!walkSummary) missing.push('walkthrough_summary');
+  if (!notes.length) missing.push('implementation_notes');
+  if (missing.length) throw new OpError('missing-fields', `missing-fields: ${missing.join(', ')}`);
+
+  const detail = loadDetail(ctx, p.target);
+  const status = fmValue(detail.fm, 'status');
+  if (status === 'cancelled') throw new OpError('format-violation', 'cancelled change:改走 archive-chg');
+  if (!detail.content.includes(APPROVED)) throw new OpError('format-violation', '缺 <!-- APPROVED -->');
+  const hasVer = detail.content.includes(VERIFIED); const hasVerDate = !fmIsNull(detail.fm, 'verified-date');
+  if (hasVer !== hasVerDate) throw new OpError('format-violation', 'verification state inconsistent');
+  const hasRev = detail.content.includes(REVIEWED); const hasRevDate = !fmIsNull(detail.fm, 'reviewed-date');
+  if (hasRev !== hasRevDate) throw new OpError('format-violation', 'review state inconsistent');
+  const statuses = taskStatuses(detail.content);
+  if (statuses.includes('!')) throw new OpError('format-violation', 'blocked tasks:存在 [!] 任务,先解除阻塞');
+  const closed = statuses.map((s) => (s === ' ' || s === '/' ? 'x' : s));
+  if (!closed.includes('x')) throw new OpError('format-violation', 'all tasks skipped, use cancelled + archive-chg');
+
+  const taskAbs = path.join(ctx.artDir, 'task.md');
+  const walkAbs = path.join(ctx.artDir, 'walkthrough.md');
+  if (!fs.existsSync(taskAbs)) throw new OpError('target-not-found', 'task.md 不存在');
+  const taskRaw = fs.readFileSync(taskAbs, 'utf8');
+  if (!taskRaw.includes(ARCHIVE_MARKER)) throw new OpError('format-violation', 'archive marker missing');
+
+  // 逐步在内存里演化文本(每步产生一个 Edit op,前后连贯),避免多 Edit 锚点互相踩
+  let content = detail.content;
+  const nl = content.includes('\r\n') ? '\r\n' : '\n';
+  const ops = [];
+  const edit = (oldString, newString) => { if (oldString === newString) return; ops.push({ kind: 'edit', file: detail.path, oldString, newString }); content = content.replace(oldString, () => newString); };
+  const cur = () => ({ ...detail, content, fm: paceUtils.parseFrontmatter(content) });
+
+  // 1. 任务收口 [ ]/[/] → [x]
+  for (const line of (taskSection(content).match(/^- \[[ /]\] T-\d{3}\b[^\r\n]*$/gm) || [])) edit(line, `- [x] ${line.slice(6)}`);
+  // 1.5 实施详情执行态记录:删占位行,每任务 ### T-NNN
+  if (content.includes(PLACEHOLDER_LINE)) {
+    const idx = content.indexOf(PLACEHOLDER_LINE);
+    const after = content.slice(idx + PLACEHOLDER_LINE.length).match(/^(\r?\n)+/);
+    edit(`${PLACEHOLDER_LINE}${after ? after[0] : ''}`, '');
+  }
+  const implLines = [];
+  for (const n of notes) {
+    const hdrRe = new RegExp(`^### ${n.id}[ \\t]*\\r?\\n`, 'm');
+    if (hdrRe.test(content)) {
+      // 已有标题:在该小节末尾补充(内容一致则跳过)
+      const h = content.match(hdrRe); const start = h.index + h[0].length; const rest = content.slice(start); const next = rest.search(/^##+ /m); const end = next >= 0 ? start + next : content.length;
+      const block = content.slice(h.index, end);
+      if (!block.includes(n.text)) edit(block, `${block.replace(/(\r?\n)+$/, '')}${nl}${nl}${n.text}${nl}${nl}`);
+    } else {
+      implLines.push(`### ${n.id}`, '', n.text, '');
+    }
+  }
+  if (implLines.length) {
+    const d = cur();
+    ops.push(appendToSectionOp(d, '实施详情', implLines.slice(0, -1), { blankLineBefore: true }));
+    content = content.replace(ops[ops.length - 1].oldString, () => ops[ops.length - 1].newString);
+  }
+  // 2. status → completed
+  const status2 = fmValue(cur().fm, 'status');
+  if (status2 !== 'archived' && status2 !== 'completed') { const o = fmSetOp(cur(), 'status', 'completed'); edit(o.oldString, o.newString); }
+  // 3. VERIFIED
+  if (!content.includes(VERIFIED)) {
+    let o = fmSetOp(cur(), 'verified-date', localIsoNow()); edit(o.oldString, o.newString);
+    o = markerAfterOp(cur(), APPROVED, VERIFIED); edit(o.oldString, o.newString);
+    o = appendToSectionOp(cur(), '工作记录', [`| ${todayLocal()} | 验证通过：${verifySummary.replace(/\r?\n/g, ' ').replace(/\|/g, '\\|')} |`]); edit(o.oldString, o.newString);
+  }
+  // 4. REVIEWED
+  if (!content.includes(REVIEWED)) {
+    let o = fmSetOp(cur(), 'reviewed-date', localIsoNow()); edit(o.oldString, o.newString);
+    o = markerAfterOp(cur(), VERIFIED, REVIEWED); edit(o.oldString, o.newString);
+    for (const ro of reviewRecordOps(cur(), reviewSource, reviewFindings)) edit(ro.oldString, ro.newString);
+  }
+  // 5. archived
+  if (fmValue(cur().fm, 'status') !== 'archived') { const o = fmSetOp(cur(), 'status', 'archived'); edit(o.oldString, o.newString); }
+  if (fmIsNull(cur().fm, 'archived-date')) { const o = fmSetOp(cur(), 'archived-date', localIsoNow()); edit(o.oldString, o.newString); }
+
+  // 6. task.md:活跃区行移到 ARCHIVE 下方(checkbox [x]);已在归档区则幂等
+  const idxOps = archiveIndexOps(taskAbs, taskRaw, detail);
+  ops.push(...idxOps.ops);
+  // 7. walkthrough.md prepend
+  ops.push(...walkthroughOps(walkAbs, detail, walkSummary, idxOps.execCtx));
+  const extra = `归档:task.md 索引行移到 ARCHIVE 下方;walkthrough.md 新增一行。`;
+  return { ops, id: detail.id, extra };
+}
+
+function archiveIndexOps(taskAbs, raw, detail) {
+  const stem = detail.stem;
+  const lineRe = new RegExp(`^- \\[[ x/!\\-]\\] \\[\\[(?:${escapeRe(stem)}|${escapeRe(idToStem(detail.id))})(?:\\|[^\\]]+)?\\]\\][^\\r\\n]*$`, 'm');
+  const nl = raw.includes('\r\n') ? '\r\n' : '\n';
+  const archiveIdx = raw.indexOf(ARCHIVE_MARKER);
+  const activePart = raw.slice(0, archiveIdx);
+  const archivedPart = raw.slice(archiveIdx);
+  const execCtxOf = (line) => (line.match(/\[worktree::[^\]]*\](?:\s*\[branch::[^\]]*\])?/) || [''])[0];
+  const mActive = activePart.match(lineRe);
+  if (mActive) {
+    const line = mActive[0];
+    const archivedLine = `- [x] ${line.slice(6)}`;
+    const ops = [];
+    // 删活跃行(连同其换行)
+    const withNl = raw.includes(`${line}${nl}`) ? `${line}${nl}` : line;
+    ops.push({ kind: 'edit', file: taskAbs, oldString: withNl, newString: '' });
+    // 插到 ARCHIVE 标记下一行
+    ops.push({ kind: 'edit', file: taskAbs, oldString: `${ARCHIVE_MARKER}`, newString: `${ARCHIVE_MARKER}${nl}${archivedLine}` });
+    return { ops, execCtx: execCtxOf(line) };
+  }
+  const mArchived = archivedPart.match(lineRe);
+  if (mArchived) return { ops: [], execCtx: execCtxOf(mArchived[0]) };
+  throw new OpError('format-violation', 'index row not found');
+}
+
+function walkthroughOps(walkAbs, detail, summary, execCtx) {
+  if (!fs.existsSync(walkAbs)) throw new OpError('target-not-found', 'walkthrough.md 不存在');
+  const raw = fs.readFileSync(walkAbs, 'utf8');
+  const nl = raw.includes('\r\n') ? '\r\n' : '\n';
+  const stem = detail.stem;
+  const alias = detail.stem === idToStem(detail.id) ? '' : `\\|${idAlias(detail.id)}`;
+  const link = alias ? `[[${stem}${alias}]]` : `[[${stem}]]`;
+  const already = raw.split(/\r?\n/).find((l) => l.includes(`[[${stem}`) && l.trim().endsWith(`| ${detail.id} |`));
+  if (already) {
+    if (execCtx && !already.includes(execCtx)) {
+      const cells = already.split(' | ');
+      // 在完成内容列末尾补上下文
+      const fixed = already.replace(new RegExp(`\\s*\\| ${escapeRe(detail.id)} \\|$`), ` ${execCtx} | ${detail.id} |`);
+      return [{ kind: 'edit', file: walkAbs, oldString: already, newString: fixed }];
+    }
+    return [];
+  }
+  const row = `| ${todayLocal()} | ${link} ${summary.replace(/\r?\n/g, ' ').replace(/\|/g, '\\|')}${execCtx ? ` ${execCtx}` : ''} | ${detail.id} |`;
+  const sepRe = /^\| --- \| --- \| --- \|[ \t]*\r?\n/m;
+  const sep = raw.match(sepRe);
+  if (sep) return [{ kind: 'edit', file: walkAbs, oldString: sep[0], newString: `${sep[0]}${row}${nl}` }];
+  const hdr = raw.match(/^## 最近工作[ \t]*\r?\n/m);
+  if (!hdr) throw new OpError('format-violation', 'walkthrough.md 缺 ## 最近工作');
+  return [{ kind: 'edit', file: walkAbs, oldString: hdr[0], newString: `${hdr[0]}${nl}| 日期 | 完成内容 | 关联变更 |${nl}| --- | --- | --- |${nl}${row}${nl}` }];
+}
+
+// ---------------------------------------------------------------------------------------------
+// record-finding(CHG-20260815-03)
+// ---------------------------------------------------------------------------------------------
+
+const FINDING_TYPES = new Set(['research', 'observation', 'comparison', 'bug-report']);
+const FINDING_STATUS_CHECKBOX = { open: '[ ]', investigating: '[/]', accepted: '[x]', rejected: '[-]', merged: '[-]', blocked: '[!]' };
+
+function buildRecordFinding(ctx, p) {
+  const title = String(p.title || '').trim();
+  const summary = String(p.summary || '').trim();
+  const type = String(p.type || '').trim();
+  const impact = String(p.impact || '').trim().toUpperCase();
+  const body = typeof p.body === 'string' ? p.body : '';
+  const status = String(p.status || 'open').trim();
+  const missing = [];
+  if (!title) missing.push('title'); if (!summary) missing.push('summary'); if (!type) missing.push('type'); if (!impact) missing.push('impact'); if (!body.trim()) missing.push('body');
+  if (missing.length) throw new OpError('missing-fields', `missing-fields: ${missing.join(', ')}`);
+  if ([...summary].length > 200) throw new OpError('format-violation', `summary 超过 200 字符(${[...summary].length})`);
+  if (!FINDING_TYPES.has(type)) throw new OpError('format-violation', `type 非法:${type}(research | observation | comparison | bug-report)`);
+  if (!/^P[0-3]$/.test(impact)) throw new OpError('format-violation', `impact 非法:${impact}(P0-P3)`);
+  if (!FINDING_STATUS_CHECKBOX[status]) throw new OpError('format-violation', `status 非法:${status}`);
+  const rejection = String(p.rejection_reason || '').trim();
+  if (status === 'rejected' && [...rejection].length < 10) throw new OpError('missing-fields', 'status=rejected 必须带 rejection_reason(≥10 字符)');
+  if (!fs.existsSync(path.join(ctx.artDir, 'changes'))) throw new OpError('not-pace-project', 'changes/ 不存在');
+
+  const date = todayLocal();
+  const slug = slugify(p.slug || title, 'finding');
+  const findingsDir = path.join(ctx.artDir, 'changes', 'findings');
+  let stem = `finding-${date}-${slug}`;
+  let n = 2;
+  while (fs.existsSync(path.join(findingsDir, `${stem}.md`))) { stem = `finding-${date}-${slug}-${n}`; n += 1; }
+  const detailAbs = path.join(findingsDir, `${stem}.md`);
+  const idxAbs = path.join(ctx.artDir, 'findings.md');
+  if (!fs.existsSync(idxAbs)) throw new OpError('target-not-found', 'findings.md 不存在');
+
+  const bodyNorm = body.replace(/\r\n/g, '\n');
+  const parts = ['---', `status: ${status}`, `date: ${date}`, 'schema-version: "7.0"', '---', '', `# ${title}`, '', bodyNorm.replace(/\n+$/, ''), ''];
+  if (status === 'rejected') parts.push('## 拒绝理由', '', rejection, '');
+  const content = parts.join('\n');
+
+  const meta = [`[date:: ${date}]`, `[impact:: ${impact}]`, `[type:: ${type}]`];
+  const related = normalizeLinkList(p.related_changes).map((l) => resolveChangeLink(ctx, l));
+  if (related.length) meta.push(`[change:: ${related.join(', ')}]`);
+  const merges = normalizeLinkList(p.merges);
+  if (merges.length) meta.push(`[merges:: ${merges.join(', ')}]`);
+  const line = `- ${FINDING_STATUS_CHECKBOX[status]} [[${stem}|${title.replace(/\|/g, '/').replace(/\]\]/g, ')')}]] — ${summary.replace(/\r?\n/g, ' ')} #finding ${meta.join(' ')}`;
+  return { ops: [{ kind: 'write', file: detailAbs, content }, findingIndexInsertOp(idxAbs, line)], id: stem.toUpperCase(), stem, extra: `索引行：\`${line}\`` };
+}
+
+/** `[[CHG-…]]` 形态的关联 CHG 解析为详情文件全名 + 纯 ID 别名(spec §5.4);找不到详情文件时原样保留 */
+function resolveChangeLink(ctx, link) {
+  const inner = String(link).replace(/^\[\[|\]\]$/g, '').split('|')[0].trim();
+  const id = normalizeId(inner);
+  if (!id) return link;
+  const fp = paceUtils.detailPathForId(ctx.artDir, id);
+  if (!fp || !fs.existsSync(fp)) return `[[${idToStem(id)}]]`;
+  const stem = path.basename(fp, '.md');
+  return stem === idToStem(id) ? `[[${stem}]]` : `[[${stem}|${idAlias(id)}]]`;
+}
+
+function normalizeLinkList(v) {
+  const arr = Array.isArray(v) ? v : (v ? String(v).split(/[,，]/) : []);
+  return arr.map((s) => String(s).trim()).filter(Boolean).map((s) => (s.startsWith('[[') ? s : `[[${s}]]`));
+}
+
+/** findings.md:插到活跃区第一个 finding 索引行之前;无索引行时插到活跃区最后一个标题下方 */
+function findingIndexInsertOp(idxAbs, line) {
+  const raw = fs.readFileSync(idxAbs, 'utf8');
+  const nl = raw.includes('\r\n') ? '\r\n' : '\n';
+  const archiveIdx = raw.indexOf(ARCHIVE_MARKER);
+  const active = archiveIdx >= 0 ? raw.slice(0, archiveIdx) : raw;
+  const first = active.match(/^- \[[ x/!\-]\] \[\[finding-[^\r\n]*$/m);
+  if (first) return { kind: 'edit', file: idxAbs, oldString: first[0], newString: `${line}${nl}${first[0]}` };
+  const headings = [...active.matchAll(/^##+ [^\r\n]*\r?\n/gm)];
+  if (!headings.length) throw new OpError('format-violation', 'findings.md 活跃区无标题可锚定');
+  const last = headings[headings.length - 1];
+  return { kind: 'edit', file: idxAbs, oldString: last[0], newString: `${last[0]}${nl}${line}${nl}` };
+}
+
+module.exports.buildCloseChg = buildCloseChg;
+module.exports.buildRecordFinding = buildRecordFinding;
+module.exports.normalizeImplNotes = normalizeImplNotes;
+module.exports.PLACEHOLDER_LINE = PLACEHOLDER_LINE;

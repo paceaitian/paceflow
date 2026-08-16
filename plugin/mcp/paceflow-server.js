@@ -93,10 +93,50 @@ const TOOLS = [
       additionalProperties: true,
     },
   },
+  {
+    name: 'close_chg',
+    description: '收口 CHG/HOTFIX(默认收尾路径,一把梭):[ ]/[/] 任务收口为 [x] → 写 implementation_notes 到 ## 实施详情 各 ### T-NNN → status completed → VERIFIED → REVIEWED + ## 审查记录 → status archived + task.md 索引移到 ARCHIVE 下方 + walkthrough.md 新增一行。前提:主 session 已运行并读取验证结果、已编排对抗审计并路由 findings。字段与 artifact-writer close-chg 同名。',
+    inputSchema: {
+      type: 'object',
+      required: ['target', 'verification_confirmed', 'complete_open_tasks', 'review_confirmed', 'review_source', 'review_findings', 'verify_summary', 'implementation_notes', 'walkthrough_summary'],
+      properties: {
+        target: { type: 'string', description: 'CHG-YYYYMMDD-NN / HOTFIX-YYYYMMDD-NN' },
+        verification_confirmed: { type: 'boolean', description: '必须为 true:主 session 已运行并读取验证结果' },
+        complete_open_tasks: { type: 'boolean', description: '必须为 true:允许把 [ ]/[/] 任务收口为 [x]' },
+        review_confirmed: { type: 'boolean', description: '必须为 true:对抗审计已跑并路由 findings' },
+        review_source: { type: 'string', description: 'manual 或所选 review agent 名' },
+        review_findings: { type: 'string', description: 'P0/P1/P2/P3 计数 + 各自处置 wikilink' },
+        verify_summary: { type: 'string', description: '已运行并读取的验证结果' },
+        implementation_notes: { type: 'array', items: { type: 'string' }, description: '每项 "T-NNN: 该任务实际改动(文件/关键实现/commit)"' },
+        walkthrough_summary: { type: 'string', description: '一行完成摘要(写入 walkthrough.md)' },
+      },
+      additionalProperties: true,
+    },
+  },
+  {
+    name: 'record_finding',
+    description: '记录调研/观察/对比/bug-report finding:写 changes/findings/finding-yyyy-mm-dd-<slug>.md(body 原样)+ findings.md 索引行(最新在顶)。字段与 artifact-writer record-finding 同名。',
+    inputSchema: {
+      type: 'object',
+      required: ['title', 'summary', 'type', 'impact', 'body'],
+      properties: {
+        title: { type: 'string' },
+        summary: { type: 'string', description: '≤200 字符' },
+        type: { type: 'string', enum: ['research', 'observation', 'comparison', 'bug-report'] },
+        impact: { type: 'string', enum: ['P0', 'P1', 'P2', 'P3'] },
+        body: { type: 'string', description: '完整 Markdown 正文(原样写入)' },
+        slug: { type: 'string', description: '英文 kebab-case slug(不给则从 title 推导)' },
+        status: { type: 'string', enum: ['open', 'investigating', 'accepted', 'rejected', 'merged', 'blocked'], description: '默认 open;rejected 需 rejection_reason' },
+        rejection_reason: { type: 'string', description: 'status=rejected 时必填(≥10 字符)' },
+        related_changes: { type: 'array', items: { type: 'string' }, description: '关联 CHG wikilink 列表' },
+        merges: { type: 'array', items: { type: 'string' } },
+      },
+      additionalProperties: true,
+    },
+  },
 ];
 
 const NOT_IMPLEMENTED = {
-  close_chg: 'CHG-20260815-03', record_finding: 'CHG-20260815-03',
   archive_chg: '后续版本', update_finding: '后续版本', record_correction: '后续版本', update_index: '后续版本',
 };
 
@@ -191,6 +231,8 @@ const TOOL_IMPL = {
     return { ...plan, operation: 'create-chg', extra: `索引行：\`${plan.indexLine}\`\n下一步:用户批准后调 update_chg action=approve-and-start target=${plan.id} task_id=T-001。` };
   }),
   update_chg: (call, args) => runOps(call, (ctx) => ({ ...ops.buildUpdateChg(ctx, args), operation: `update-chg action=${args.action}` })),
+  close_chg: (call, args) => runOps(call, (ctx) => ({ ...ops.buildCloseChg(ctx, args), operation: 'close-chg' })),
+  record_finding: (call, args) => runOps(call, (ctx) => ({ ...ops.buildRecordFinding(ctx, args), operation: 'record-finding' })),
 };
 
 // ---------------------------------------------------------------------------------------------

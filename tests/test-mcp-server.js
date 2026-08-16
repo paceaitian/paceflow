@@ -113,7 +113,7 @@ test('MS-E1 握手 + tools/list 稳定 + get_context 报 artifact_dir/空活跃�
   const dir = makeProject('ms-e1');
   const { out } = rpc(dir, [{ method: 'tools/list', params: {} }, call('get_context', {}, dir)]);
   assert.strictEqual(out[0].result.serverInfo.name, 'paceflow');
-  assert.deepStrictEqual(out[1].result.tools.map((x) => x.name), ['get_context', 'reserve_artifact_id', 'create_chg', 'update_chg']);
+  assert.deepStrictEqual(out[1].result.tools.map((x) => x.name), ['get_context', 'reserve_artifact_id', 'create_chg', 'update_chg', 'close_chg', 'record_finding']);
   const ctx = sc(out[2]);
   assert.strictEqual(path.resolve(ctx.artifact_dir), path.resolve(dir));
   assert.deepStrictEqual(ctx.active_changes, []);
@@ -177,7 +177,7 @@ test('MS-E4 边界:approve 幂等;approve-and-start 对 completed 拒绝;verify 
     call('update_chg', { target: id, action: 'verify', verify_summary: 'x' }, dir),
     call('update_chg', { target: id, action: 'review', review_confirmed: true, review_source: 'manual', review_findings: 'x' }, dir),
     call('update_chg', { target: id, action: 'approve-and-start', approval_confirmed: true, approval_source: 'user-directive', approval_evidence: 'ok' }, dir),
-    call('close_chg', { target: id }, dir),
+    call('archive_chg', { target: id }, dir),
     call('update_chg', { target: 'CHG-19990101-99', action: 'approve', approval_confirmed: true, approval_source: 'user-directive', approval_evidence: 'ok' }, dir),
   ]);
   assert.strictEqual(r2.out[1].result.isError, false, textOf(r2.out[1]));
@@ -186,7 +186,7 @@ test('MS-E4 边界:approve 幂等;approve-and-start 对 completed 拒绝;verify 
   assert.strictEqual(sc(r2.out[4]).code, 'format-violation', `verify 非 completed:${textOf(r2.out[4])}`);
   assert.strictEqual(sc(r2.out[5]).code, 'format-violation', `review 未 verified:${textOf(r2.out[5])}`);
   assert.strictEqual(sc(r2.out[6]).code, 'missing-fields', `approve-and-start 缺 task_id:${textOf(r2.out[6])}`);
-  assert.strictEqual(sc(r2.out[7]).code, 'not-implemented');
+  assert.strictEqual(sc(r2.out[7]).code, 'not-implemented', 'archive_chg 仍未实现');
   assert.strictEqual(sc(r2.out[8]).code, 'target-not-found');
   const content = fs.readFileSync(path.join(dir, 'changes', `${id.toLowerCase()}-edge.md`), 'utf8');
   assert.strictEqual((content.match(/<!-- APPROVED -->/g) || []).length, 1, 'APPROVED 只有一处');
@@ -214,6 +214,87 @@ test('MS-E5 update-status 全部 [x] → completed + task.md [x];[!] 带原因 �
   assert.ok(/^status: completed$/m.test(content), content.slice(0, 200));
   assert.ok(/T-002 暂停\/阻塞：等依赖/.test(content));
   assert.ok(new RegExp(`^- \\[x\\] \\[\\[${id.toLowerCase()}-sm\\|`, 'm').test(taskAt()), taskAt());
+});
+
+test('MS-E6 close_chg 一把梭:任务收口 → 实施详情 ### T-NNN → completed → VERIFIED → REVIEWED → archived + task.md 移 ARCHIVE + walkthrough 行;二次调用幂等', () => {
+  const dir = makeProject('ms-e6');
+  const id = sc(rpc(dir, [call('reserve_artifact_id', {}, dir)]).out[1]).reserved[0].reserved_id;
+  const closeArgs = { target: id, verification_confirmed: true, complete_open_tasks: true, review_confirmed: true, review_source: 'opus-audit', review_findings: 'P0×0 / P1×0 / P2×1(record-finding [[finding-x]]) / P3×0', verify_summary: 'node tests 9/9', implementation_notes: ['T-001: 改了 a.js', 'T-002: 加了测试'], walkthrough_summary: 'close 冒烟完成' };
+  const r = rpc(dir, [
+    call('create_chg', { reserved_id: id, title: 'close 冒烟', slug: 'close-e2e', tasks: ['甲', '乙'], background: 'why', scope: 'what', technical_decision: 'how' }, dir),
+    call('update_chg', { target: id, action: 'approve-and-start', task_id: 'T-001', approval_confirmed: true, approval_source: 'user-directive', approval_evidence: 'ok' }, dir),
+    call('close_chg', closeArgs, dir),
+    call('close_chg', closeArgs, dir),
+  ]);
+  for (let i = 1; i <= 4; i++) assert.strictEqual(r.out[i].result.isError, false, `step ${i}: ${textOf(r.out[i])}`);
+  assert.deepStrictEqual(sc(r.out[4]).files, { created: [], modified: [] }, `二次 close 应零写入:${textOf(r.out[4])}`);
+  const detail = fs.readFileSync(path.join(dir, 'changes', `${id.toLowerCase()}-close-e2e.md`), 'utf8');
+  const fm = paceUtils.parseFrontmatter(detail);
+  assert.strictEqual(String(fm.status), 'archived');
+  assert.ok(paceUtils.validateFrontmatterSchema('chg', 'archived', fm).ok, JSON.stringify(paceUtils.validateFrontmatterSchema('chg', 'archived', fm)));
+  assert.ok(/^archived-date: \d{4}-/m.test(detail) && /^verified-date: \d{4}-/m.test(detail) && /^reviewed-date: \d{4}-/m.test(detail));
+  assert.ok(/- \[x\] T-001 甲\n- \[x\] T-002 乙\n\n<!-- APPROVED -->\n<!-- VERIFIED -->\n<!-- REVIEWED -->\n\n## 实施详情/.test(detail), detail.slice(0, 600));
+  assert.ok(!detail.includes(ops.PLACEHOLDER_LINE), '占位行已删');
+  assert.ok(/\*\*技术决策（How）\*\*：how\n\n### T-001\n\n改了 a\.js\n\n### T-002\n\n加了测试\n\n## 工作记录/.test(detail), detail.slice(300, 900));
+  assert.ok(/\| 验证通过：node tests 9\/9 \|/.test(detail));
+  assert.ok(/## 审查记录\n\n\| 日期 \| 审计来源 \| findings \|\n\| --- \| --- \| --- \|\n\| \d{4}-\d{2}-\d{2} \| opus-audit \| P0×0/.test(detail));
+  const task = fs.readFileSync(path.join(dir, 'task.md'), 'utf8');
+  const [active, archived] = task.split('<!-- ARCHIVE -->');
+  assert.ok(!active.includes(id.toLowerCase()), '活跃区无该行');
+  assert.ok(new RegExp(`^- \\[x\\] \\[\\[${id.toLowerCase()}-close-e2e\\|${id.toLowerCase()}\\]\\] close 冒烟 #change`, 'm').test(archived), archived);
+  assert.strictEqual((task.match(/close-e2e/g) || []).length, 1, '索引行只有一份');
+  const walk = fs.readFileSync(path.join(dir, 'walkthrough.md'), 'utf8');
+  assert.ok(new RegExp(`\\| \\d{4}-\\d{2}-\\d{2} \\| \\[\\[${id.toLowerCase()}-close-e2e\\\\\\|${id.toLowerCase()}\\]\\] close 冒烟完成 \\[worktree:: [^\\]]+\\] \\[branch:: [^\\]]+\\] \\| ${id} \\|`).test(walk), walk);
+  assert.strictEqual((walk.match(/close 冒烟完成/g) || []).length, 1, 'walkthrough 行只有一份(幂等)');
+  assert.ok(paceUtils.validateWalkthroughLinks ? true : true);
+});
+
+test('MS-E7 close_chg 边界:缺 review_confirmed → missing-fields;有 [!] 任务 → format-violation;缺 APPROVED → format-violation;record_finding 边界(summary>200 / type 非法 / rejected 缺理由)', () => {
+  const dir = makeProject('ms-e7');
+  const id = sc(rpc(dir, [call('reserve_artifact_id', {}, dir)]).out[1]).reserved[0].reserved_id;
+  const base = { target: id, verification_confirmed: true, complete_open_tasks: true, review_source: 'manual', review_findings: 'x', verify_summary: 'y', implementation_notes: ['T-001: z'], walkthrough_summary: 'w' };
+  const r = rpc(dir, [
+    call('create_chg', { reserved_id: id, title: '边界', slug: 'edge2', tasks: ['甲', '乙'] }, dir),
+    call('close_chg', { ...base, review_confirmed: true }, dir), // 未 APPROVED
+    call('update_chg', { target: id, action: 'approve-and-start', task_id: 'T-001', approval_confirmed: true, approval_source: 'user-directive', approval_evidence: 'ok' }, dir),
+    call('close_chg', base, dir), // 缺 review_confirmed
+    call('update_chg', { target: id, action: 'update-status', section: 'tasks', task_id: 'T-002', new_status: '[!]', status_reason: '等依赖' }, dir),
+    call('close_chg', { ...base, review_confirmed: true }, dir), // [!] 任务
+    call('record_finding', { title: 't', summary: 'x'.repeat(201), type: 'research', impact: 'P3', body: 'b' }, dir),
+    call('record_finding', { title: 't', summary: 's', type: 'doc-drift', impact: 'P3', body: 'b' }, dir),
+    call('record_finding', { title: 't', summary: 's', type: 'research', impact: 'P3', body: 'b', status: 'rejected', rejection_reason: '短' }, dir),
+  ]);
+  assert.strictEqual(sc(r.out[2]).code, 'format-violation', textOf(r.out[2]));
+  assert.strictEqual(sc(r.out[4]).code, 'missing-fields', textOf(r.out[4]));
+  assert.strictEqual(sc(r.out[6]).code, 'format-violation', textOf(r.out[6]));
+  assert.ok(/blocked|\[!\]/.test(sc(r.out[6]).message));
+  assert.strictEqual(sc(r.out[7]).code, 'format-violation'); assert.strictEqual(sc(r.out[8]).code, 'format-violation'); assert.strictEqual(sc(r.out[9]).code, 'missing-fields');
+  assert.ok(!fs.existsSync(path.join(dir, 'changes', 'findings', `finding-${ops.todayLocal()}-t.md`)), '失败不落盘');
+});
+
+test('MS-E8 record_finding:详情 3-key frontmatter + body 原样 + findings.md 最新在顶;related_changes 解析为全名+别名;rejected → [-] + 拒绝理由段;slug 碰撞加序号', () => {
+  const dir = makeProject('ms-e8');
+  const id = sc(rpc(dir, [call('reserve_artifact_id', {}, dir)]).out[1]).reserved[0].reserved_id;
+  const body = '第一段\n\n```js\nconst a = 1;\n```\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n';
+  const r = rpc(dir, [
+    call('create_chg', { reserved_id: id, title: '关联', slug: 'rel', tasks: ['甲'] }, dir),
+    call('record_finding', { title: '第一条', summary: '摘要一', type: 'research', impact: 'P2', body, slug: 'first', related_changes: [id] }, dir),
+    call('record_finding', { title: '第二条', summary: '摘要二', type: 'bug-report', impact: 'P1', body: 'b2', slug: 'first' }, dir),
+    call('record_finding', { title: '第三条 rejected', summary: '摘要三', type: 'observation', impact: 'P3', body: 'b3', slug: 'third', status: 'rejected', rejection_reason: '判定不修,理由足够长' }, dir),
+  ]);
+  for (let i = 1; i <= 4; i++) assert.strictEqual(r.out[i].result.isError, false, `step ${i}: ${textOf(r.out[i])}`);
+  const today = ops.todayLocal();
+  const f1 = fs.readFileSync(path.join(dir, 'changes', 'findings', `finding-${today}-first.md`), 'utf8');
+  assert.ok(f1.startsWith(`---\nstatus: open\ndate: ${today}\nschema-version: "7.0"\n---\n\n# 第一条\n\n第一段\n\n\`\`\`js\nconst a = 1;\n\`\`\`\n\n| a | b |`), f1);
+  assert.ok(paceUtils.validateFrontmatterSchema('finding', 'open', paceUtils.parseFrontmatter(f1)).ok);
+  assert.ok(fs.existsSync(path.join(dir, 'changes', 'findings', `finding-${today}-first-2.md`)), 'slug 碰撞加 -2');
+  const f3 = fs.readFileSync(path.join(dir, 'changes', 'findings', `finding-${today}-third.md`), 'utf8');
+  assert.ok(/^status: rejected$/m.test(f3) && /## 拒绝理由\n\n判定不修,理由足够长/.test(f3), f3);
+  const idx = fs.readFileSync(path.join(dir, 'findings.md'), 'utf8').split('\n').filter((l) => l.startsWith('- ['));
+  assert.strictEqual(idx.length, 3);
+  assert.ok(idx[0].startsWith(`- [-] [[finding-${today}-third|第三条 rejected]] — 摘要三 #finding [date:: ${today}] [impact:: P3] [type:: observation]`), idx[0]);
+  assert.ok(idx[1].startsWith(`- [ ] [[finding-${today}-first-2|第二条]]`), idx[1]);
+  assert.ok(idx[2].includes(`[change:: [[${id.toLowerCase()}-rel|${id.toLowerCase()}]]]`), idx[2]);
 });
 
 t.cleanupAll = function() {

@@ -73,23 +73,30 @@ function applyEdit(file, oldString, newString) {
 }
 
 /**
- * 干跑(不碰盘、不调 hook):Edit 的 old_string 必须唯一命中,Write 的目标不得已存在(与 artifact-writer 的
- * file-conflict 规则一致,除非 op.overwrite=true——只用于本管线内先建后改的同文件场景)。
+ * 干跑(不碰盘、不调 hook):按顺序在内存里模拟应用全部 op——Edit 的 old_string 必须在「前序 op 应用后」的内容里
+ * 恰好命中一次(与 Claude Edit 工具语义一致,且允许同一文件多次连续 Edit);Write 的目标不得已存在(与 artifact-writer
+ * 的 file-conflict 规则一致,除非 op.overwrite=true——只用于本管线内先建后改的同文件场景)。
  */
 function dryCheck(ops) {
-  const seenWrites = new Set();
+  const mem = new Map();
+  const load = (file) => {
+    if (mem.has(file)) return mem.get(file);
+    if (!fs.existsSync(file)) return null;
+    const raw = fs.readFileSync(file, 'utf8');
+    mem.set(file, raw);
+    return raw;
+  };
   for (const op of ops) {
     if (op.kind === 'write') {
       if (fs.existsSync(op.file) && !op.overwrite) return { ok: false, code: 'file-conflict', reason: `目标文件已存在:${op.file}` };
-      seenWrites.add(op.file);
+      mem.set(op.file, op.content);
     } else {
-      if (!fs.existsSync(op.file) && !seenWrites.has(op.file)) return { ok: false, code: 'target-not-found', reason: `文件不存在:${op.file}` };
-      if (fs.existsSync(op.file)) {
-        const raw = fs.readFileSync(op.file, 'utf8');
-        const first = raw.indexOf(op.oldString);
-        if (first < 0) return { ok: false, code: 'edit-mismatch', reason: `old_string 未命中:${path.basename(op.file)}` };
-        if (raw.indexOf(op.oldString, first + op.oldString.length) >= 0) return { ok: false, code: 'edit-mismatch', reason: `old_string 命中多处:${path.basename(op.file)}` };
-      }
+      const cur = load(op.file);
+      if (cur === null) return { ok: false, code: 'target-not-found', reason: `文件不存在:${op.file}` };
+      const first = cur.indexOf(op.oldString);
+      if (first < 0) return { ok: false, code: 'edit-mismatch', reason: `old_string 未命中:${path.basename(op.file)}` };
+      if (cur.indexOf(op.oldString, first + op.oldString.length) >= 0) return { ok: false, code: 'edit-mismatch', reason: `old_string 命中多处:${path.basename(op.file)}` };
+      mem.set(op.file, cur.slice(0, first) + op.newString + cur.slice(first + op.oldString.length));
     }
   }
   return { ok: true };
