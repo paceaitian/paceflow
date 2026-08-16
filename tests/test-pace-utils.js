@@ -1334,6 +1334,74 @@ test('同一 session 多个 reservation 可按目标文件精确匹配', () => {
   assert.strictEqual(findArtifactReservationForRel(dir, owner, secondFile).filePrefix, second.filePrefix);
 });
 
+test('HOTFIX-20260816-03: 写非 CHG/correction 文件不消费同 session 的 CHG reservation；写 CHG 详情只消费命中的那一条', () => {
+  const dir = makeTmpDir('reservation-consume-strict');
+  fs.mkdirSync(path.join(dir, 'changes'), { recursive: true });
+  const owner = { sessionId: 'sid-consume', agentId: '' };
+  const [first, second] = paceUtils.reserveArtifactIds(dir, { ...owner, artifactDir: dir, operation: 'create-chg', prompt: 'operation: create-chg' }, 2).reservations;
+  assert.ok(first.filePrefix && second.filePrefix && first.filePrefix !== second.filePrefix);
+  const writer = { sessionId: 'sid-consume', agentId: 'agent-writer' };
+  // ① 纯判据：非 CHG/correction 路径一律不消费；错误 kind 的前缀也不消费
+  assert.strictEqual(paceUtils.reservationConsumedByRel(first, 'changes/findings/finding-2026-08-16-x.md'), false);
+  assert.strictEqual(paceUtils.reservationConsumedByRel(first, 'findings.md'), false);
+  assert.strictEqual(paceUtils.reservationConsumedByRel(first, 'walkthrough.md'), false);
+  assert.strictEqual(paceUtils.reservationConsumedByRel(first, 'task.md'), false);
+  assert.strictEqual(paceUtils.reservationConsumedByRel(first, `${first.filePrefix}slug.md`), true);
+  assert.strictEqual(paceUtils.reservationConsumedByRel(first, `${first.filePrefix.replace(/-$/, '')}.md`), true, '精确 id 名（无 slug）也算命中');
+  assert.strictEqual(paceUtils.reservationConsumedByRel(first, `${second.filePrefix}slug.md`), false, '别的连号不消费本条');
+  assert.strictEqual(paceUtils.reservationConsumedByRel({ filePrefix: 'changes/corrections/correction-2026-08-16-01-' }, `${first.filePrefix}slug.md`), false, 'correction 预留不被 CHG 文件消费');
+  assert.strictEqual(paceUtils.reservationConsumedByRel({ filePrefix: 'changes/corrections/correction-2026-08-16-01-' }, 'changes/corrections/correction-2026-08-16-01-some-slug.md'), true, 'correction 预留被自己的 correction 详情消费（正向）');
+  assert.strictEqual(paceUtils.reservationConsumedByRel({ filePrefix: 'changes/corrections/correction-2026-08-16-01-' }, 'changes/corrections/correction-2026-08-16-02-other.md'), false, '别的 correction 编号不消费本条');
+  assert.strictEqual(paceUtils.reservationConsumedByRel(first, `${first.filePrefix}slug.md`.replace(/\//g, '\\')), true, 'Windows 反斜杠 rel 归一后仍命中');
+  // ② 宽松校验判据保持默认放行（派遣/写盘 lookup 语义不变）
+  assert.strictEqual(paceUtils.reservationMatchesArtifactRel(first, 'changes/findings/finding-2026-08-16-x.md').ok, true);
+  // ③ 端到端：artifact-writer 身份 Write finding 详情 / findings.md / walkthrough.md → 两条 CHG reservation 都保留
+  for (const rel of ['changes/findings/finding-2026-08-16-x.md', 'findings.md', 'walkthrough.md', 'task.md']) {
+    assert.strictEqual(clearArtifactReservationForRel(dir, writer, rel), false, `${rel} 不应消费任何 reservation`);
+  }
+  assert.strictEqual(findArtifactReservationForRel(dir, owner, `${first.filePrefix}a.md`).filePrefix, first.filePrefix);
+  assert.strictEqual(findArtifactReservationForRel(dir, owner, `${second.filePrefix}b.md`).filePrefix, second.filePrefix);
+  // ④ 写第一条的详情文件只清第一条，第二条（batch 连号）保留
+  assert.strictEqual(clearArtifactReservationForRel(dir, writer, `${first.filePrefix}slug.md`), true);
+  assert.strictEqual(findArtifactReservationForRel(dir, owner, `${first.filePrefix}a.md`), null);
+  assert.strictEqual(findArtifactReservationForRel(dir, owner, `${second.filePrefix}b.md`).filePrefix, second.filePrefix);
+});
+
+test('HOTFIX-20260816-03: releaseArtifactResourcesForOwner 无 agentId 时不清 session 级 reservation，有 agentId 只清该 agent 的', () => {
+  const dir = makeTmpDir('release-owner-guard');
+  fs.mkdirSync(path.join(dir, 'changes'), { recursive: true });
+  const sessionRes = reserveArtifactId(dir, { sessionId: 'sid-guard', agentId: '', artifactDir: dir, operation: 'create-chg', prompt: 'operation: create-chg' });
+  const agentRes = reserveArtifactId(dir, { sessionId: 'sid-guard', agentId: 'agent-own', artifactDir: dir, operation: 'create-chg', prompt: 'operation: create-chg' });
+  assert.ok(sessionRes.reserved && agentRes.reserved);
+  // SubagentStop 缺 agent_id 的退化形态：只应释放锁，不动主 session 的 reservation
+  paceUtils.releaseArtifactResourcesForOwner(dir, { sessionId: 'sid-guard', agentId: '' });
+  assert.strictEqual(findArtifactReservationForRel(dir, { sessionId: 'sid-guard' }, `${sessionRes.filePrefix}x.md`).filePrefix, sessionRes.filePrefix, 'session 级 reservation 应保留');
+  assert.strictEqual(findArtifactReservationForRel(dir, { sessionId: 'sid-guard', agentId: 'agent-own' }, `${agentRes.filePrefix}x.md`).filePrefix, agentRes.filePrefix, 'agent 的 reservation 也不该被无 agentId 的清理动到');
+  // 带 agentId 的正常清理：只清该 agent 自己的
+  paceUtils.releaseArtifactResourcesForOwner(dir, { sessionId: 'sid-guard', agentId: 'agent-own' });
+  assert.strictEqual(findArtifactReservationForRel(dir, { sessionId: 'sid-guard', agentId: 'agent-own' }, `${agentRes.filePrefix}x.md`), null);
+  assert.strictEqual(findArtifactReservationForRel(dir, { sessionId: 'sid-guard' }, `${sessionRes.filePrefix}x.md`).filePrefix, sessionRes.filePrefix, 'session 级 reservation 仍保留');
+});
+
+test('HOTFIX-20260816-03（审计 P1-2）: readArtifactReservation 过滤超期 reservation，与 findArtifactReservationForRel / reserve helper 的 TTL 语义对齐', () => {
+  const dir = makeTmpDir('reservation-ttl-read');
+  fs.mkdirSync(path.join(dir, 'changes'), { recursive: true });
+  const owner = { sessionId: 'sid-ttl', agentId: '' };
+  const res = reserveArtifactId(dir, { ...owner, artifactDir: dir, operation: 'create-chg', prompt: 'operation: create-chg' });
+  assert.ok(res.reserved);
+  assert.strictEqual(readArtifactReservation(dir, owner).id, res.id, '未超期应能读到');
+  // 把 reservation 文件的 timestampMs 改成超过 ARTIFACT_WRITER_LOCK_TTL_MS
+  const resDir = path.join(dir, '.pace', 'reservations');
+  for (const f of fs.readdirSync(resDir)) {
+    const fp = path.join(resDir, f);
+    const parsed = JSON.parse(fs.readFileSync(fp, 'utf8'));
+    parsed.timestampMs = Date.now() - paceUtils.ARTIFACT_WRITER_LOCK_TTL_MS - 60000;
+    fs.writeFileSync(fp, JSON.stringify(parsed, null, 2), 'utf8');
+  }
+  assert.strictEqual(readArtifactReservation(dir, owner), null, '超期 reservation 应视为不存在（否则派遣门会回吐过期 id 引发两轮无效 deny）');
+  assert.strictEqual(findArtifactReservationForRel(dir, owner, `${res.filePrefix}x.md`), null);
+});
+
 test('isArtifactRuntimeControlPath 识别锁/sequence/reservation 控制面', () => {
   const dir = makeTmpDir('runtime-control');
   assert.strictEqual(isArtifactRuntimeControlPath(dir, path.join(dir, '.pace', 'locks')), true);
@@ -1791,6 +1859,78 @@ test('worktree 读取宿主 artifact-root=local → 返回宿主项目目录', (
   assert.strictEqual(getProjectRuntimeDir(worktree), path.join(host, '.pace'));
   assert.strictEqual(getArtifactRootChoicePath(worktree), path.join(host, '.pace', 'artifact-root'));
   assert.strictEqual(getArtifactDir(worktree), host);
+});
+
+test('HOTFIX-20260816-02: worktree 跟随宿主 checkout 的有效 Project Root（宿主为 inherited 子目录时落父级）', () => {
+  // 布局：父级 PACE 项目 root（.pace/artifact-root=local + changes/）/ 嵌套 git 子目录 host（无自有 artifact，主 cwd 解析为 inherited）
+  //   ① host/.claude/worktrees/x（Claude worktree，路径形态判定）② root/wt/feature（真实 git worktree，.git 文件 gitdir 指向 host/.git/worktrees/feature）
+  const root = makeTmpDir('wt-inherited-root');
+  const host = path.join(root, 'packages', 'app');
+  const claudeWt = path.join(host, '.claude', 'worktrees', 'x');
+  const gitWt = path.join(root, 'wt', 'feature');
+  fs.mkdirSync(path.join(root, '.pace'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'changes'), { recursive: true });
+  fs.writeFileSync(path.join(root, '.pace', 'artifact-root'), 'local\n', 'utf8');
+  fs.mkdirSync(path.join(host, '.git'), { recursive: true });
+  fs.mkdirSync(claudeWt, { recursive: true });
+  fs.mkdirSync(gitWt, { recursive: true });
+  fs.writeFileSync(path.join(gitWt, '.git'), `gitdir: ${path.join(host, '.git', 'worktrees', 'feature')}\n`, 'utf8');
+
+  const hostInfo = resolveEffectiveProjectRoot(host);
+  assert.strictEqual(hostInfo.mode, 'inherited');
+  assert.strictEqual(hostInfo.projectRoot, root);
+
+  for (const [label, wt, reason] of [['claude', claudeWt, 'claude-worktree'], ['git', gitWt, 'git-worktree']]) {
+    const info = resolveEffectiveProjectRoot(wt);
+    assert.strictEqual(info.mode, 'worktree', `${label}: mode`);
+    assert.strictEqual(info.reason, reason, `${label}: reason`);
+    assert.strictEqual(info.projectRoot, root, `${label}: projectRoot 应与宿主主 cwd 一致（父级）`);
+    assert.strictEqual(info.runtimeRoot, path.join(root, '.pace'), `${label}: runtimeRoot`);
+    assert.strictEqual(info.inheritedFrom, root, `${label}: inheritedFrom 记录宿主的有效根`);
+    assert.strictEqual(getProjectRuntimeDir(wt), path.join(root, '.pace'), `${label}: runtime dir`);
+    assert.strictEqual(getArtifactRootChoicePath(wt), path.join(root, '.pace', 'artifact-root'), `${label}: choice path`);
+    assert.strictEqual(getArtifactDir(wt), root, `${label}: artifact dir 跟随 local 选择落父级`);
+    assert.strictEqual(artifactRootChoiceNeeded(wt), false, `${label}: 不应被当成首次启用`);
+  }
+});
+
+test('HOTFIX-20260816-02（审计 P3-3/P2-1）: 宿主 independent / worktree-of-worktree / 嵌套 .claude/worktrees 一致解析；互指 .git 指针成环不抛栈溢出', () => {
+  // ① 宿主 independent（.pace/project-root 标记）→ worktree 落宿主自身
+  const root = makeTmpDir('wt-independent-root');
+  fs.mkdirSync(path.join(root, '.pace'), { recursive: true });
+  fs.writeFileSync(path.join(root, '.pace', 'artifact-root'), 'local\n', 'utf8');
+  const host = path.join(root, 'svc');
+  fs.mkdirSync(path.join(host, '.pace'), { recursive: true });
+  fs.mkdirSync(path.join(host, '.git'), { recursive: true });
+  fs.writeFileSync(path.join(host, '.pace', 'project-root'), 'independent\n', 'utf8');
+  fs.writeFileSync(path.join(host, '.pace', 'artifact-root'), 'local\n', 'utf8');
+  const wt = path.join(host, '.claude', 'worktrees', 'a');
+  fs.mkdirSync(wt, { recursive: true });
+  assert.strictEqual(resolveEffectiveProjectRoot(host).mode, 'independent');
+  assert.strictEqual(resolveEffectiveProjectRoot(wt).projectRoot, host, 'independent 宿主的 worktree 应落宿主自身');
+  assert.strictEqual(resolveEffectiveProjectRoot(wt).inheritedFrom, '', '宿主即根时 inheritedFrom 为空');
+  // ② worktree 套 worktree：git worktree wt1 里再开 .claude/worktrees/x → 与 wt1 主 cwd 一致
+  const wt1 = path.join(root, 'wt1');
+  fs.mkdirSync(wt1, { recursive: true });
+  fs.writeFileSync(path.join(wt1, '.git'), `gitdir: ${path.join(host, '.git', 'worktrees', 'wt1')}\n`, 'utf8');
+  const nested = path.join(wt1, '.claude', 'worktrees', 'x');
+  fs.mkdirSync(nested, { recursive: true });
+  assert.strictEqual(resolveEffectiveProjectRoot(nested).projectRoot, resolveEffectiveProjectRoot(wt1).projectRoot);
+  assert.strictEqual(resolveEffectiveProjectRoot(nested).projectRoot, host);
+  // ③ .claude/worktrees 深链 x3
+  const deep = path.join(host, '.claude', 'worktrees', 'd1', '.claude', 'worktrees', 'd2', '.claude', 'worktrees', 'd3');
+  fs.mkdirSync(deep, { recursive: true });
+  assert.strictEqual(resolveEffectiveProjectRoot(deep).projectRoot, host);
+  // ④ 互指 .git 指针（损坏/人为）：A/.git → B/.git/worktrees/x，B/.git → A/.git/worktrees/y → 不得抛 RangeError
+  const cyc = makeTmpDir('wt-cycle-root');
+  const A = path.join(cyc, 'A'); const B = path.join(cyc, 'B');
+  fs.mkdirSync(A, { recursive: true }); fs.mkdirSync(B, { recursive: true });
+  fs.writeFileSync(path.join(A, '.git'), `gitdir: ${path.join(B, '.git', 'worktrees', 'x')}\n`, 'utf8');
+  fs.writeFileSync(path.join(B, '.git'), `gitdir: ${path.join(A, '.git', 'worktrees', 'y')}\n`, 'utf8');
+  let cycInfo = null;
+  assert.doesNotThrow(() => { cycInfo = resolveEffectiveProjectRoot(A); }, '互指 .git 不应栈溢出');
+  assert.strictEqual(cycInfo.mode, 'worktree');
+  assert.ok([A, B].includes(cycInfo.projectRoot), `成环时退回宿主目录本身：${cycInfo.projectRoot}`);
 });
 
 test('worktree 宿主 .pace/disabled 对 worktree 生效', () => {

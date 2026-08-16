@@ -186,7 +186,7 @@ Artifacts can live in an Obsidian vault, with optional cross-project knowledge a
 
 ### Worktrees and Agent Teams
 
-Git worktrees and Claude Code worktrees share PACEflow artifacts and runtime state through the host Project Root while ordinary code edits remain in the current worktree. Teammates receive differentiated enforcement so workflow guidance does not create deadlocks while approval and integrity boundaries remain hard.
+Git worktrees and Claude Code worktrees share PACEflow artifacts and runtime state through the host checkout's effective Project Root (the host's own root, or the parent project it inherits from) while ordinary code edits remain in the current worktree. Teammates receive differentiated enforcement so workflow guidance does not create deadlocks while approval and integrity boundaries remain hard.
 
 ## Runtime scope and trust boundary
 

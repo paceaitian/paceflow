@@ -219,9 +219,12 @@ function worktreeHostNonArtifactWriteNote(cwd, artDir, filePath, artifactRel) {
   if (!filePath || artifactRel) return '';
   const context = paceUtils.executionContextForCwd(cwd);
   if (!context.isWorktree) return '';
-  if (!isUnderDir(context.stateDir, filePath)) return '';
+  // HOTFIX-20260816-02（审计 P1-1）：判定基准是宿主 checkout（hostDir），不是 stateDir——stateDir 现在是宿主的有效
+  // Project Root，宿主为 inherited 子目录时它是祖父，写 sibling 包 / 父项目根文件不该收到「目标在宿主 checkout」的提示。
+  const hostDir = context.hostDir || context.stateDir;
+  if (!isUnderDir(hostDir, filePath)) return '';
   if (isUnderDir(cwd, filePath)) return '';
-  const relToHost = path.relative(context.stateDir, filePath).replace(/\\/g, '/');
+  const relToHost = path.relative(hostDir, filePath).replace(/\\/g, '/');
   return [
     `当前 cwd 是 worktree：${displayDir(cwd)}；本次普通文件目标在宿主 checkout：${filePath}`,
     `artifact_dir=${displayDir(artDir)} 仅用于 PaceFlow artifacts；${relToHost} 不是 artifact。`,

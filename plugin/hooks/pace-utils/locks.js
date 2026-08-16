@@ -297,15 +297,28 @@ module.exports = function createLockUtils(ctx) {
     return !!owner.sessionId && !!reservation.sessionId && owner.sessionId === reservation.sessionId;
   }
 
+  // HOTFIX-20260816-03（审计 P1-2）：超期 reservation 一律视为不存在——此前只有 findArtifactReservationForRel /
+  // reserve helper 判 TTL，派遣门经本函数读到超期预留会回吐已过期 id，调用方带它重派又被 lookup 判「无效或已过期」，
+  // 两轮无效 deny 才自恢复。统一在读取处过滤，与 findArtifactReservationForRel / reusableReservation 对齐。
+  function reservationExpired(reservation, now = Date.now()) {
+    return !!(reservation && reservation.timestampMs && now - reservation.timestampMs > ARTIFACT_WRITER_LOCK_TTL_MS);
+  }
+
   function readArtifactReservation(cwd, info = {}) {
     const fp = getArtifactReservationPath(cwd, info);
     if (fp) {
-      try { return JSON.parse(fs.readFileSync(fp, 'utf8')); } catch(e) {}
+      try {
+        const parsed = JSON.parse(fs.readFileSync(fp, 'utf8'));
+        if (!reservationExpired(parsed)) return parsed;
+      } catch(e) {}
     }
     if (info.agentId) {
       const fallback = getArtifactReservationPath(cwd, { ...info, agentId: '' });
       if (fallback && fallback !== fp) {
-        try { return JSON.parse(fs.readFileSync(fallback, 'utf8')); } catch(e) {}
+        try {
+          const parsed = JSON.parse(fs.readFileSync(fallback, 'utf8'));
+          if (!reservationExpired(parsed)) return parsed;
+        } catch(e) {}
       }
     }
     return null;
@@ -364,7 +377,8 @@ module.exports = function createLockUtils(ctx) {
       let parsed = null;
       try { parsed = JSON.parse(fs.readFileSync(target, 'utf8')); } catch(e) {}
       if (!reservationMatchesOwner(parsed, info)) continue;
-      if (!reservationMatchesArtifactRel(parsed, rel).ok) continue;
+      // HOTFIX-20260816-03：消费用精确判据（rel 必须是该 reservation 自己的目标文件），不复用默认放行的校验判据
+      if (!reservationConsumedByRel(parsed, rel)) continue;
       try { fs.unlinkSync(target); cleared = true; } catch(e) {}
     }
     return cleared;
@@ -414,7 +428,13 @@ module.exports = function createLockUtils(ctx) {
         }
       }
     }
-    clearArtifactReservation(cwd, owner);
+    // HOTFIX-20260816-03：调用方有三处——SubagentStop（agent 上下文，宿主字段可缺，缺 agent_id 已有实录）、
+    // PostToolUseFailure-Agent（跑在派遣方上下文，主 session 派遣时 agentId 恒空）、MCP writer-pipeline 失败回滚（agentId 非空）。
+    // owner 无 agentId 时它退化成 session 级——此时清 reservation 会把主 session 的预留一并删掉，所以只有带 agentId 才清
+    // 该 agent 自己的 reservation。副作用：Agent 派遣失败后 session 级预留保留（下次 reserve 由 reusableReservation 复用，
+    // 超期由 readArtifactReservation 过滤 + SessionStart sweep 回收），不再像修前那样被派遣失败顺手清掉。资源锁清理不受影响
+    // （lockMatchesOwner 在 agentId 空时回落 sessionId 比对，仍能清子 agent 持有的锁）。
+    if (owner.agentId) clearArtifactReservation(cwd, owner);
     const txPath = ownerScopedPath(cwd, 'index-transactions', owner);
     try { fs.unlinkSync(txPath); } catch(e) {}
     return released;
@@ -738,7 +758,7 @@ module.exports = function createLockUtils(ctx) {
   }
 
   // 批量预留 N 个唯一编号；count=1 时与单条预留等价。返回 reservations 数组，
-  // 每个元素形如单数 reserveArtifactId 的成功返回（create-chg: {id,fileRel,...}；
+  // 每个元素形如单数 reserveArtifactId 的成功返回（create-chg: {id,filePrefix,...}；
   // record-correction: {id,filePrefix,...}）。N 个编号在同一序列锁内连续取号保证连号。
   function reserveArtifactIds(cwd, info = {}, count = 1) {
     const n = Math.max(1, Math.floor(Number(count) || 1));
@@ -792,8 +812,8 @@ module.exports = function createLockUtils(ctx) {
     return result.reservations[0];
   }
 
-  // @see pre-tool-use/agent-lifecycle-guard.js reservationMatchesExplicit —— 两函数防守同一不变量
-  //   （编号必来自 hook 预留）的两半：本函数判实际写入的目标文件 rel，reservationMatchesExplicit 判
+  // @see pre-tool-use/agent-lifecycle-guard.js reservationMatchesExplicit 与下方 reservationConsumedByRel —— 三函数防守同一不变量
+  //   （编号必来自 hook 预留）：本函数判实际写入的目标文件 rel（宽松校验），reservationConsumedByRel 判该 rel 是否消费预留（严格），reservationMatchesExplicit 判
   //   agent prompt 声明的 explicit 字段。两者 filePrefix 容错须同为 startsWith；改一侧须同步另一侧。
   function reservationMatchesArtifactRel(reservation, artifactRel) {
     if (!reservation || !artifactRel) return { ok: true };
@@ -814,6 +834,28 @@ module.exports = function createLockUtils(ctx) {
         : { ok: false, expected: `${reservation.filePrefix}<slug>.md`, actual: rel };
     }
     return { ok: true };
+  }
+
+  // HOTFIX-20260816-03：「消费」判据与上面的「校验」判据分开。reservationMatchesArtifactRel 对非 CHG/HOTFIX、
+  // 非 correction 的 rel（task.md / findings.md / walkthrough / finding 详情…）默认放行——用于派遣门/写盘门 lookup
+  // 是对的（写索引不与 reservation 冲突），但 clearArtifactReservationForRel 曾拿它当消费判据，导致 artifact-writer
+  // 一次 Write finding 详情就把同 session 全部 reservation（含 batch 连号）清空，随后 create-chg 派遣被拒「无效或已过期」。
+  // 消费必须精确命中 reservation 自身的目标文件模式：CHG/HOTFIX 预留只被 changes/(chg|hotfix)-<id>[-slug].md 消费，
+  // CORRECTION 预留只被 changes/corrections/correction-<id>-*.md 消费，其余路径一律不消费。
+  function reservationConsumedByRel(reservation, artifactRel) {
+    if (!reservation || !reservation.filePrefix || !artifactRel) return false;
+    const rel = String(artifactRel || '').replace(/\\/g, '/');
+    const prefix = String(reservation.filePrefix).replace(/\\/g, '/');
+    if (/^changes\/(?:chg|hotfix)-\d{8}-\d{2}(?:-[^/]+)?\.md$/i.test(rel)) {
+      if (!/^changes\/(?:chg|hotfix)-\d{8}-\d{2}-$/i.test(prefix)) return false;
+      const stem = prefix.replace(/-$/, '');
+      return rel === `${stem}.md` || (rel.startsWith(prefix) && rel.endsWith('.md'));
+    }
+    if (/^changes\/corrections\/correction-\d{4}-\d{2}-\d{2}-\d{2}-.+\.md$/i.test(rel)) {
+      if (!/^changes\/corrections\/correction-\d{4}-\d{2}-\d{2}-\d{2}-$/i.test(prefix)) return false;
+      return rel.startsWith(prefix) && rel.endsWith('.md');
+    }
+    return false;
   }
 
   function isArtifactRuntimeControlPath(cwd, targetPath) {
@@ -857,6 +899,7 @@ module.exports = function createLockUtils(ctx) {
     clearArtifactReservation,
     clearArtifactReservationForRel,
     reservationMatchesArtifactRel,
+    reservationConsumedByRel,
     isArtifactRuntimeControlPath,
     getChangeOwnerPath,
     readChangeOwner,

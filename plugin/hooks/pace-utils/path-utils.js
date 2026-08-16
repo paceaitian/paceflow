@@ -308,6 +308,10 @@ function explicitProjectRootReason(dir, options = {}) {
   return '';
 }
 
+// worktree → 宿主有效根的递归解析深度（同步递归，进程内计数即可）；上限防互指 .git 指针成环时栈溢出（审计 P2-1）
+const WORKTREE_RESOLVE_MAX_DEPTH = 8;
+let _wtResolveDepth = 0;
+
 function resolveEffectiveProjectRoot(cwd) {
   const resolved = path.resolve(cwd || process.cwd());
   if (hasDisabledMarker(resolved)) {
@@ -326,13 +330,25 @@ function resolveEffectiveProjectRoot(cwd) {
   const gitHost = gitWorktreeHostDir(resolved);
   const wtHost = wtBase || gitHost;
   if (wtHost) {
+    // HOTFIX-20260816-02：worktree 共享的是宿主 checkout 的「有效 Project Root」——对宿主目录做一次普通解析
+    // （等价于「在宿主 checkout 里开 session 会得到什么根」）：宿主自身是根（current/independent）仍为宿主目录，
+    // 宿主是继承父级的子目录（嵌套 repo）则跟随其父级，宿主 disabled 则落宿主目录由 disabled 标记生效。
+    // 此前直接返回宿主目录：宿主为 inherited 时 worktree 与主 cwd 解析到不同的根，worktree 被当成「首次启用」。
+    // 递归深度上限（审计 P2-1）：git 自身不会产生互指的 .git 文件，但损坏/人为构造的 gitdir 指针会让宿主解析
+    // 互跳成环；正常形态（worktree 套 worktree、.claude/worktrees 深链）几层即终止，超限时退回宿主目录本身。
+    let hostInfo = null;
+    if (wtHost !== resolved && _wtResolveDepth < WORKTREE_RESOLVE_MAX_DEPTH) {
+      _wtResolveDepth += 1;
+      try { hostInfo = resolveEffectiveProjectRoot(wtHost); } finally { _wtResolveDepth -= 1; }
+    }
+    const projectRoot = hostInfo && hostInfo.projectRoot ? hostInfo.projectRoot : wtHost;
     return {
-      projectRoot: wtHost,
-      runtimeRoot: path.join(wtHost, '.pace'),
+      projectRoot,
+      runtimeRoot: path.join(projectRoot, '.pace'),
       mode: 'worktree',
       reason: wtBase ? 'claude-worktree' : 'git-worktree',
       cwd: resolved,
-      inheritedFrom: '',
+      inheritedFrom: projectRoot !== wtHost ? projectRoot : '',
       inherited: true,
     };
   }
@@ -475,6 +491,9 @@ function executionContextForCwd(cwd) {
     cwd: resolved,
     stateDir,
     checkoutDir: wtCheckout || resolved,
+    // HOTFIX-20260816-02（审计 P1-1）：宿主 checkout 目录单列——stateDir 现在是宿主的有效 Project Root（可能是祖父），
+    // 「写的是不是宿主 checkout 里的文件」这类判定要用 hostDir，不能再拿 stateDir 当宿主目录。
+    hostDir: wtHost || '',
     isWorktree,
     projectRoot: stateDir,
     projectRootMode: rootInfo.mode,

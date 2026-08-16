@@ -196,7 +196,7 @@ brainstorming → writing-plans → pace-bridge（plan 转 CHG）→ auto-APPROV
 
 下面是多 session、并发和写保护的行为边界，完整规则见 [REFERENCE](REFERENCE.md)：
 
-- **Worktree 共享**：Git worktree 与 `.claude/worktrees/*` 的 PACEflow artifact 和 `.pace` 运行态归一到宿主 Project Root，不分裂出独立 `task.md` / `changes/`；普通代码文件仍写当前 worktree。
+- **Worktree 共享**：Git worktree 与 `.claude/worktrees/*` 的 PACEflow artifact 和 `.pace` 运行态归一到宿主 checkout 的有效 Project Root（宿主自身的根，或宿主所继承的父级项目），不分裂出独立 `task.md` / `changes/`；普通代码文件仍写当前 worktree。
 - **并发**：CHG 编号原子预留、写入按资源加锁，允许多 worktree 并行写代码、共享索引串行；`.pace` 控制面文件（lock / sequence / reservation）不可手写，冲突时等待或重试、不删锁。
 - **写保护**：`task.md` / `walkthrough.md` / `findings.md` / `corrections.md` / `changes/**` 以及 `<!-- APPROVED -->` / `<!-- VERIFIED -->` 标记只由 `artifact-writer` 写入，主 session 直写会被 deny；`spec.md` 例外，由你维护。
 - **状态权威**：`changes/<id>.md` frontmatter 是 CHG 状态权威，索引 checkbox 只做展示；Claude 任务面板是工作记忆、不是 artifact 权威，不一致时以详情文件为准。

@@ -36,7 +36,7 @@ PACEflow 的运行边界使用以下术语：
 | Project Root | PACEflow 管理的项目边界；`.pace` 运行态、CHG owner、Stop 检查和 `local` artifact root 归属这里 |
 | Artifact Root | `spec.md / task.md / walkthrough.md / findings.md / corrections.md / changes/**` 的存放目录 |
 
-普通子目录默认继承最近的父级 PACEflow Project Root。真实 git worktree 仍共享宿主 Project Root。只有当前子目录确实是独立项目时，运行：
+普通子目录默认继承最近的父级 PACEflow Project Root。真实 git worktree 与 `.claude/worktrees/*` 共享宿主 checkout 的有效 Project Root（宿主为 inherited 子目录时跟随其父级）。只有当前子目录确实是独立项目时，运行：
 
 ```bash
 node "<plugin>/hooks/set-project-root.js" --mode independent

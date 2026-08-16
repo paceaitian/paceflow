@@ -2326,6 +2326,32 @@ test('9ha1. local 模式 worktree 中写宿主普通文件 → 仅提示 artifac
   assert.ok(r.stdout.includes('如果用户明确要求修改宿主 checkout'));
 });
 
+test('9ha1b. HOTFIX-20260816-02: 宿主为 inherited 子目录时，worktree 写宿主 checkout 文件仍提示，写 sibling 包 / 父项目根文件不提示（判定基准 hostDir 非 stateDir）', () => {
+  const root = makeTmpDir('worktree-inherited-host-note-root');
+  const host = path.join(root, 'packages', 'app');
+  const sibling = path.join(root, 'packages', 'other');
+  const worktree = path.join(host, '.claude', 'worktrees', 'w');
+  fs.mkdirSync(path.join(root, '.pace'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'changes'), { recursive: true });
+  fs.writeFileSync(path.join(root, '.pace', 'artifact-root'), 'local\n', 'utf8');
+  for (const file of ['task.md', 'walkthrough.md', 'findings.md', 'corrections.md']) {
+    fs.writeFileSync(path.join(root, file), `# ${file}\n\n<!-- ARCHIVE -->\n`, 'utf8');
+  }
+  fs.mkdirSync(path.join(host, '.git'), { recursive: true });
+  fs.mkdirSync(path.join(sibling, 'src'), { recursive: true });
+  fs.mkdirSync(worktree, { recursive: true });
+  const write = (fp) => runHook('pre-tool-use.js', { cwd: worktree, stdin: { tool_name: 'Write', tool_input: { file_path: fp, content: 'x\n' } } });
+  const hostR = write(path.join(host, 'branch-note.md'));
+  assert.strictEqual(hostR.code, 0);
+  assert.ok(hostR.stdout.includes('当前 cwd 是 worktree'), '写宿主 checkout 内文件仍应提示');
+  const siblingR = write(path.join(sibling, 'src', 'note.md'));
+  assert.strictEqual(siblingR.code, 0);
+  assert.ok(!siblingR.stdout.includes('当前 cwd 是 worktree'), 'sibling 包不在宿主 checkout 内，不应提示「目标在宿主 checkout」');
+  const parentR = write(path.join(root, 'NOTES.md'));
+  assert.strictEqual(parentR.code, 0);
+  assert.ok(!parentR.stdout.includes('当前 cwd 是 worktree'), '父项目根文件不在宿主 checkout 内，不应提示');
+});
+
 test('9ha2. vault 模式 worktree 中写宿主普通文件 → 仅提示 artifact_dir 语义，不 hard deny', () => {
   const { host, worktree } = makeVaultBackedWorktree('vault-host-normal-write');
   const hostFile = path.join(host, 'branch-note.md');
@@ -7953,6 +7979,38 @@ test('22a. PostToolUseFailure 用户中断只记录日志不注入恢复提示',
   });
   assert.strictEqual(r.code, 0);
   assert.strictEqual(r.stdout, '');
+});
+
+test('22a1. HOTFIX-20260816-03: artifact-writer Write finding 详情的 PostToolUse 不清主 session 的 CHG reservation；Write 命中的 CHG 详情只清那一条', () => {
+  const dir = makeV6Project('ptu-reservation-consume');
+  fs.writeFileSync(path.join(dir, '.pace-enabled'), '');
+  fs.mkdirSync(path.join(dir, '.pace'), { recursive: true });
+  fs.writeFileSync(path.join(dir, '.pace', 'artifact-root'), 'local\n', 'utf8');
+  const helper = runReserveHelper({ cwd: dir, args: ['--operation', 'create-chg', '--count', '2'], env: { CLAUDE_CODE_SESSION_ID: 'sid-consume-e2e' } });
+  assert.strictEqual(helper.code, 0, helper.stderr);
+  const ids = [...helper.stdout.matchAll(/reserved-id:\s*(CHG-\d{8}-\d{2})/g)].map((m) => m[1]);
+  assert.strictEqual(ids.length, 2, `应预留 2 个连号：${helper.stdout}`);
+  const resDir = path.join(dir, '.pace', 'reservations');
+  const listRes = () => fs.readdirSync(resDir).filter((f) => f.endsWith('.json')).sort();
+  const before = listRes();
+  assert.ok(before.length >= 2, `预留后应有 reservation 文件：${before.join(',')}`);
+  const writer = { session_id: 'sid-consume-e2e', agent_id: 'agent-consume-e2e', agent_type: 'paceflow:artifact-writer' };
+  // ① 以 artifact-writer 身份 Write finding 详情（修前会把同 session 全部 reservation 当作已消费清空）
+  const findingFile = path.join(dir, 'changes', 'findings', 'finding-2026-08-16-consume-probe.md');
+  fs.writeFileSync(findingFile, '---\nstatus: open\ndate: 2026-08-16\nschema-version: "7.0"\n---\n\n# probe\n', 'utf8');
+  const r1 = runHook('post-tool-use.js', { cwd: dir, stdin: { ...writer, tool_name: 'Write', tool_input: { file_path: findingFile, content: '' } } });
+  assert.strictEqual(r1.code, 0, r1.stderr);
+  assert.deepStrictEqual(listRes(), before, 'Write finding 详情后 reservation 应全部保留');
+  // ② Write 第一条 CHG 的详情文件 → 只清第一条，第二条（batch 连号）保留
+  const firstStem = `chg-${ids[0].slice(4).toLowerCase()}`;
+  const chgFile = path.join(dir, 'changes', `${firstStem}-probe.md`);
+  fs.writeFileSync(chgFile, chgDetail(), 'utf8');
+  const r2 = runHook('post-tool-use.js', { cwd: dir, stdin: { ...writer, tool_name: 'Write', tool_input: { file_path: chgFile, content: '' } } });
+  assert.strictEqual(r2.code, 0, r2.stderr);
+  const after = listRes();
+  const remainingIds = after.map((f) => JSON.parse(fs.readFileSync(path.join(resDir, f), 'utf8')).id);
+  assert.ok(!remainingIds.includes(ids[0]), `第一条 ${ids[0]} 应被消费：${remainingIds.join(',')}`);
+  assert.ok(remainingIds.includes(ids[1]), `第二条 ${ids[1]} 应保留：${remainingIds.join(',')}`);
 });
 
 test('22b. hooks.json 为 PostToolUseFailure 注册 Agent / command-tool matcher', () => {

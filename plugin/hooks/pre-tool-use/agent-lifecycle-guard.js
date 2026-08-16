@@ -407,8 +407,8 @@ function reservationRelForLookup(explicit) {
   return '';
 }
 
-// @see pace-utils/locks.js reservationMatchesArtifactRel —— 两函数防守同一不变量（CHG/HOTFIX/
-//   CORRECTION 编号必来自 hook 预留）的两半：本函数判 agent prompt 声明的 explicit 字段（id/fileRel），
+// @see pace-utils/locks.js reservationMatchesArtifactRel / reservationConsumedByRel —— 三函数防守同一不变量（CHG/HOTFIX/
+//   CORRECTION 编号必来自 hook 预留）：本函数判 agent prompt 声明的 explicit 字段（id/fileRel），
 //   reservationMatchesArtifactRel 判实际写入的目标文件 rel。两者 filePrefix 容错须同为 startsWith；
 //   改一侧的容错策略须同步另一侧，避免「prompt 路径放行但写盘路径拦」类不对称回归。
 function reservationMatchesExplicit(reservation, explicit) {

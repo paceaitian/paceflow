@@ -75,9 +75,9 @@ function main() {
   const context = paceUtils.executionContextForCwd(cwd);
   if (context.isWorktree) {
     fail(cwd, 'DENY_WORKTREE_PROJECT_ROOT', [
-      '当前 cwd 是 git worktree，PACEflow 保持 worktree 与宿主 Project Root 共享 artifact 和 runtime。',
+      '当前 cwd 是 git worktree，PACEflow 保持 worktree 与宿主 checkout 的有效 Project Root 共享 artifact 和 runtime。',
       `当前 cwd: ${cwd.replace(/\\/g, '/')}`,
-      `宿主 Project Root: ${context.projectRoot.replace(/\\/g, '/')}`,
+      `共享 Project Root: ${context.projectRoot.replace(/\\/g, '/')}`,
       '如需独立 PaceFlow 项目，请在非 worktree 的独立项目目录中运行 set-project-root helper。'
     ].join('\n'), { project_root: context.projectRoot });
     return;

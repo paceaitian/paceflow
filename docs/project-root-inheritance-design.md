@@ -132,7 +132,7 @@ resolveEffectiveProjectRoot(cwd)
   projectRoot,
   runtimeRoot,
   mode,          // current | inherited | independent | worktree | disabled
-  inheritedFrom, // inherited 时为父 Project Root，否则为空
+  inheritedFrom, // inherited 时为父 Project Root；worktree 且宿主自身为 inherited 时为宿主的有效根（HOTFIX-20260816-02）；否则为空
   reason
 }
 ```
@@ -283,9 +283,9 @@ mode=<current|inherited|independent|worktree>
 
 既有真实 git worktree / `.claude/worktrees` 语义保持：
 
-- worktree 共享宿主 Project Root。
+- worktree 共享**宿主 checkout 的有效 Project Root**：宿主自身是根则为宿主目录；宿主是继承父级的子目录（嵌套 repo）时跟随其父级（HOTFIX-20260816-02 补齐——此前 worktree 分支直接返回宿主目录，宿主为 inherited 时 worktree 与主 cwd 解析到不同的根）。
 - owner worktree / branch context 不变。
-- 普通 ancestor scan 不应把 worktree 错归到更上层父项目。
+- 普通 ancestor scan 不应把 worktree 错归到更上层父项目（worktree 只沿宿主的解析结果走，不从 worktree 自身路径向上扫）。
 
 ## 8. 分阶段实施
 
