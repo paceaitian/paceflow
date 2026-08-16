@@ -24,10 +24,10 @@ test('RUN-2: 全部子套件通过 → 整体 exitCode 0', () => {
   assert.strictEqual(exitCode, 0, '全通过时 exitCode 必须为 0');
 });
 
-test('RUN-3: SUITES 清单含 5 个核心套件 + plugin-validate + git-diff-check', () => {
+test('RUN-3: SUITES 清单含 7 个核心套件（含 CHG-20260815-04 挂入的 codex-adapter / mcp-server）+ plugin-validate + git-diff-check', () => {
   const { SUITES } = require('./run-all');
   const names = SUITES.map((s) => s.name);
-  for (const core of ['pace-utils', 'hooks-e2e', 'session-layers', 'migrate-v7', 'agent-helpers']) {
+  for (const core of ['pace-utils', 'hooks-e2e', 'session-layers', 'migrate-v7', 'agent-helpers', 'codex-adapter', 'mcp-server']) {
     assert.ok(names.includes(core), `SUITES 应含核心套件 ${core}`);
   }
   assert.ok(names.includes('plugin-validate'), 'SUITES 应含 plugin-validate');

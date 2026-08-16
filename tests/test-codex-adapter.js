@@ -209,6 +209,8 @@ test('CA-E1 PreToolUse apply_patch Add(无活跃 CHG)→ 真写码门 deny,Codex
   const reason = denyOf(out);
   assert.ok(reason, `应 deny,stdout=${out.stdout.slice(0, 200)}`);
   assert.ok(/CHG/.test(reason), '文案指向创建 CHG');
+  assert.ok(reason.includes('Codex 宿主译注') && reason.includes('create_chg'), 'Claude 口径的 deny 文案在 Codex 出口追加 MCP 译注(CHG-04 T-001 / 审计 P3-10)');
+  assert.strictEqual((reason.match(/Codex 宿主译注/g) || []).length, 1, '译注只追加一次');
 });
 
 test('CA-E2 PreToolUse apply_patch Update(有 in-progress CHG)→ 放行(无 deny 输出)', () => {
@@ -308,6 +310,7 @@ test('CA-E11 Stop:有 completed 未 verified 的 CHG → exit 2 + stderr 原样�
   const out = runAdapter('stop', { cwd: dir, stdin: codexBase(dir, { hook_event_name: 'Stop', stop_hook_active: false, last_assistant_message: 'done' }) });
   assert.strictEqual(out.code, 2, `stdout=${out.stdout} stderr=${out.stderr.slice(0, 200)}`);
   assert.ok(out.stderr.length > 0);
+  if (/artifact-writer/.test(out.stderr)) assert.ok(out.stderr.includes('Codex 宿主译注'), 'Stop 阻断文案提到 artifact-writer 时也追加译注');
 });
 
 test('CA-E12 Stop:无未收口 CHG → exit 0,stdout 为空或合法 JSON(Codex 要求)', () => {

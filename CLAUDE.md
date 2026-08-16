@@ -26,7 +26,7 @@ PACEflow 的运行时行为必须由以下位置定义：
 node tests/run-all.js
 
 # 迭代时按名分片只跑某套件（子串匹配套件名：pace-utils / hooks-e2e /
-# session-layers / migrate-v7 / agent-helpers / run-all-self / plugin-validate / git-diff-check）
+# session-layers / migrate-v7 / agent-helpers / codex-adapter / mcp-server / run-all-self / plugin-validate / git-diff-check）
 PACE_TEST_FILTER=hooks-e2e node tests/run-all.js
 
 # 发版后核整段 release 区间 whitespace：push 后 @{upstream}..HEAD=0，upstream 区间查不到已推送的
@@ -43,7 +43,7 @@ PACE_RELEASE_BASE=<上一个 release 的 commit> node tests/run-all.js
 ```bash
 # 从 paceflow/ 运行（或从仓库根 node paceflow/bump-version.js）
 node bump-version.js --dry-run v7.2.16   # 先预览将改哪些文件
-node bump-version.js v7.2.16             # 同步 5 处：constants.js PACE_VERSION / plugin.json / marketplace.json / REFERENCE.md 标题 / README.md 版本行（footer）
+node bump-version.js v7.2.16             # 同步 6 处：constants.js PACE_VERSION / .claude-plugin/plugin.json / .codex-plugin/plugin.json / marketplace.json / REFERENCE.md 标题 / README.zh-CN.md 版本行（footer）
 ```
 
 脚本**不覆盖**、仍需手动的两处：
@@ -51,7 +51,7 @@ node bump-version.js v7.2.16             # 同步 5 处：constants.js PACE_VERS
 - `README.md` 版本历史表格新增一行 changelog（人读描述，脚本不生成）
 - `CLAUDE.md` 等散文里残留的版本号（如有）
 
-收尾走上面「常用验证」：`node tests/run-all.js` 8/8 → commit → push → 三向确认 `git rev-parse HEAD` == `git rev-parse origin/master` == `git ls-remote origin master`（防 commit/push 链短路推旧 HEAD 静默漏发）。
+收尾走上面「常用验证」：`node tests/run-all.js` 10/10 → commit → push → 三向确认 `git rev-parse HEAD` == `git rev-parse origin/master` == `git ls-remote origin master`（防 commit/push 链短路推旧 HEAD 静默漏发）。
 
 push 三向确认后，**打 tag + 建 GitHub release**——漏这步会让版本史断档、用户看不到 release notes（v7.0~v7.2.14 就因发版流程没写这步全缺、后来批量回填）：
 

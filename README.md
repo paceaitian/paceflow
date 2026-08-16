@@ -77,7 +77,7 @@ Restart Claude Code after installation, then enable PACEflow in a project:
 /paceflow:enable
 ```
 
-The plugin registers nine hook event types, four user skills, five user commands, and one `artifact-writer` agent.
+The plugin registers twelve hook event types, four user skills, five user commands, and one `artifact-writer` agent.
 
 ### Optional Obsidian storage
 
@@ -88,6 +88,19 @@ $PACE_VAULT_PATH/projects/<project-name>/
 ```
 
 The choice is persisted in `.pace/artifact-root`. Headless environments can set `PACE_ARTIFACT_ROOT` to `local`, `vault`, or an absolute path.
+
+### Codex CLI (MVP)
+
+PACEflow also installs into OpenAI Codex CLI (verified on codex-cli 0.147.0 on Linux; **Windows not yet verified**). Codex reads the same plugin directory through `.codex-plugin/plugin.json`: hooks are registered from `hooks/hooks.codex.json` — every entry runs `hooks/codex-adapter.js`, which translates Codex events (`apply_patch`, MCP tool calls, plain-text output) for the shared hook scripts, so the gate logic is the same code — and artifact writes go through the bundled `paceflow` MCP server instead of the `artifact-writer` subagent (Codex subagent prompts are opaque to hooks and hooks do not fire inside subagents).
+
+```text
+codex plugin marketplace add paceaitian/paceflow
+codex plugin add paceflow@paceaitian-paceflow
+```
+
+Then review and trust the hooks with `/hooks` (automation can pass `--dangerously-bypass-hook-trust`) and start a new thread. Enable PACEflow per project with the helper the SessionStart hook prints (`set-artifact-root.js --choice local|vault`).
+
+MVP scope on Codex: the write gate on `apply_patch`/Bash, the Stop gate, SessionStart/UserPromptSubmit injection, and the MCP tools `get_context` / `reserve_artifact_id` / `create_chg` / `update_chg` (approve, approve-and-start, update-status, append, verify, review) / `close_chg` / `record_finding`. Not covered yet: `archive-chg`, `update-finding`, `record-correction`, `update-index`, batch create — and, as a host limitation, file writes made inside Codex subagents are not gated. Details in the [reference manual](REFERENCE.md#52-codex-cli-宿主).
 
 ## Quick start
 
@@ -134,7 +147,7 @@ PACEflow registers hooks for twelve lifecycle events:
 
 - `SessionStart` restores project and change context.
 - `UserPromptSubmit` injects a one-line active-change summary on each user turn when this session has a running or closing-required change (second anti-forgetting channel; silent when paused or nothing matches).
-- `PreToolUse` guards code writes, shell mutations, agent dispatches, approvals, artifact writes, and runtime control files.
+- `PreToolUse` guards code writes made through Write/Edit/MultiEdit (the code-write gate), agent dispatches, approvals, and artifact / runtime-control writes — including shell commands that would mutate artifacts or `.pace`. Shell writes to ordinary code files are not gated: the gate is a reminder against forgetting, not a sandbox.
 - `PostToolUse` and `PostToolUseFailure` record or surface follow-up requirements.
 - `SubagentStart` and `Notification` are logging-only observers (lifecycle accounting and host-event field collection).
 - `SubagentStop` fires on every subagent stop (including mid-run idles on host 2.1.232+); it observes `artifact-writer` reports and closes change ownership only on a terminal SUCCESS report.

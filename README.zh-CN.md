@@ -73,6 +73,19 @@ CHG/HOTFIX 是连续执行、可验证、可关闭的最小变更单元，不是
 
 > **可选**：设置环境变量 `PACE_VAULT_PATH` 指向你的 Obsidian Vault。新项目首次写代码或派 `artifact-writer` 时，PACEflow 会要求主 session 询问 artifact 存放在 `$PACE_VAULT_PATH/projects/<项目名>/` 还是本地项目目录，并把选择持久化到 Project Root 的 `.pace/artifact-root`；`local` 表示 Project Root 本地目录，不是当前子目录，也不是 `.pace/`。已有 `changes/` 的项目沿用现有位置。真实 Git worktree 和 `.claude/worktrees/<name>` 会自动归一到宿主项目名；也可用 `PACE_PROJECT_NAME` 显式指定项目名。自动化/headless 环境可设置 `PACE_ARTIFACT_ROOT=local|vault|/abs/path` 跳过询问。
 
+### Codex CLI（MVP）
+
+PACEflow 也能装进 OpenAI Codex CLI（codex-cli 0.147.0 / Linux 一手实测；**Windows 尚未验证**）。Codex 读同一个插件目录里的 `.codex-plugin/plugin.json`：hook 从 `hooks/hooks.codex.json` 注册——每条都经 `hooks/codex-adapter.js` 把 Codex 事件（`apply_patch`、MCP 工具调用、纯文本输出）翻译给与 Claude Code 共用的 hook 脚本，门逻辑是同一份代码；artifact 写入不派 `artifact-writer` 子代理，改走插件自带的 `paceflow` MCP server（Codex 子代理 prompt 对 hook 不可读、子代理内 hooks 不触发）。
+
+```bash
+codex plugin marketplace add paceaitian/paceflow
+codex plugin add paceflow@paceaitian-paceflow
+```
+
+装完在 Codex 里用 `/hooks` 审阅并信任 hook（自动化可加 `--dangerously-bypass-hook-trust`），开新线程生效；每个项目仍按 SessionStart 注入里的 helper 启用（`set-artifact-root.js --choice local|vault`）。
+
+Codex MVP 覆盖：写码门（`apply_patch`/Bash）、Stop 门、SessionStart/UserPromptSubmit 注入，MCP 工具 `get_context` / `reserve_artifact_id` / `create_chg` / `update_chg`（approve / approve-and-start / update-status / append / verify / review）/ `close_chg` / `record_finding`。未覆盖：`archive-chg`、`update-finding`、`record-correction`、`update-index`、batch create；以及宿主限制——Codex 子代理内的文件写入不受门约束。细节见 [REFERENCE](REFERENCE.md#52-codex-cli-宿主)。
+
 ### Project Root 与子目录继承
 
 PACEflow 区分三个路径：
@@ -179,6 +192,7 @@ brainstorming → writing-plans → pace-bridge（plan 转 CHG）→ auto-APPROV
 - **并发**：CHG 编号原子预留、写入按资源加锁，允许多 worktree 并行写代码、共享索引串行；`.pace` 控制面文件（lock / sequence / reservation）不可手写，冲突时等待或重试、不删锁。
 - **写保护**：`task.md` / `walkthrough.md` / `findings.md` / `corrections.md` / `changes/**` 以及 `<!-- APPROVED -->` / `<!-- VERIFIED -->` 标记只由 `artifact-writer` 写入，主 session 直写会被 deny；`spec.md` 例外，由你维护。
 - **状态权威**：`changes/<id>.md` frontmatter 是 CHG 状态权威，索引 checkbox 只做展示；Claude 任务面板是工作记忆、不是 artifact 权威，不一致时以详情文件为准。
+- **写码门的边界**：只覆盖 Write/Edit/MultiEdit（Codex 上是 `apply_patch`）这条诚实路径；用 shell 往项目里 cp/heredoc/sed 写代码不会被拦——门是防遗忘的兜底提醒，不是沙箱，故意绕过不在设计目标内。
 
 ---
 
@@ -192,7 +206,7 @@ brainstorming → writing-plans → pace-bridge（plan 转 CHG）→ auto-APPROV
 | **SubagentStart** | subagent 派遣时 | 仅记录 agent_id/agent_type 做生命周期对账（不阻断不注入） |
 | **Notification** | 宿主通知事件 | 仅记录事件字段形态收集触发分布（观察期，不阻断不注入） |
 | **UserPromptSubmit** | 每轮用户输入时 | 本 session 有 running / closing-required CHG 时注入一行摘要（≤300 字符，第二防遗忘通道；pause / 无命中零输出） |
-| **PreToolUse:Write/Edit/MultiEdit/Bash/PowerShell/Monitor/Agent** | AI 写代码、运行命令或派 artifact-writer 前 | 无活跃 CHG / 无审批 / 状态不一致 / 直接写 artifact 或 `.pace` 控制面 → deny |
+| **PreToolUse:Write/Edit/MultiEdit/Bash/PowerShell/Monitor/Agent** | AI 写代码、运行命令或派 artifact-writer 前 | Write/Edit/MultiEdit 写代码：无活跃 CHG / 无审批 / 状态不一致 → deny（写码门）；Bash/PowerShell/Monitor：只裁改 artifact / `.pace` 控制面的命令并识别 helper，不裁 shell 对普通代码文件的写入；Agent：artifact-writer 派遣字段门 |
 | **PostToolUse** | AI 写代码后 | schema/wikilink/归档/correction 提醒 |
 | **PostToolUseFailure** | 写入/验证工具失败后 | 提醒不要把失败工具调用视为完成 |
 | **SubagentStop** | subagent 每轮停止时（宿主 v2.1.232 起含中间轮 idle） | 识别 `artifact-writer` 后观察报告/记录 transcript；仅终态 SUCCESS 报告才关闭 CHG owner |

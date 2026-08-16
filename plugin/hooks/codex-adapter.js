@@ -210,13 +210,16 @@ function forward(hookFile, eventObj, extraArgs, sessionId) {
 
 /** 把真 hook 的输出翻译成 Codex 形态并退出。 */
 function emit(result, eventKey) {
-  if (result.stderr) process.stderr.write(result.stderr);
+  if (result.stderr) {
+    const needsNote = /artifact-writer|reserve-artifact-id/.test(result.stderr) && !result.stderr.includes('Codex 宿主译注');
+    process.stderr.write(needsNote ? `${result.stderr.replace(/\n?$/, '\n')}${CODEX_DENY_NOTE}\n` : result.stderr);
+  }
   if (result.status === 2) process.exit(2);
   if (result.status !== 0) process.exit(result.status);
   const text = String(result.stdout || '');
   if (!text.trim()) process.exit(0);
   const parsed = tryParseJson(text);
-  if (parsed) { process.stdout.write(JSON.stringify(parsed)); process.exit(0); }
+  if (parsed) { process.stdout.write(JSON.stringify(withCodexNote(parsed))); process.exit(0); }
   const eventName = EVENT_NAMES[eventKey];
   if (eventKey === 'session-start' || eventKey === 'user-prompt-submit') {
     process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: eventName, additionalContext: text } }));
@@ -230,6 +233,18 @@ function emit(result, eventKey) {
 
 function denyOutput(reason) {
   return JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } });
+}
+
+// 真 hook 的 deny/stderr 文案是 Claude 宿主口径(「派 artifact-writer create-chg」「先运行 Bash: node reserve-artifact-id.js」);
+// Codex 上这些动作都对应 MCP 工具。不改 49 处真 hook 文案(CHG-01 审计 P3-10),而是在 adapter 出口给 deny 追加一行译注。
+const CODEX_DENY_NOTE = '（Codex 宿主译注:文中「派 artifact-writer <op>」= 调用 MCP 工具 paceflow.<op 的下划线名>,如 create_chg / update_chg / close_chg / record_finding;「reserve helper」= MCP 工具 reserve_artifact_id;字段同名,连字符改下划线。）';
+function withCodexNote(parsed) {
+  const hso = parsed && parsed.hookSpecificOutput;
+  if (hso && hso.permissionDecision === 'deny' && typeof hso.permissionDecisionReason === 'string'
+    && /artifact-writer|reserve-artifact-id/.test(hso.permissionDecisionReason) && !hso.permissionDecisionReason.includes('Codex 宿主译注')) {
+    hso.permissionDecisionReason = `${hso.permissionDecisionReason}\n${CODEX_DENY_NOTE}`;
+  }
+  return parsed;
 }
 
 function resolveArtifactDir(cwd) {
@@ -324,4 +339,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { parseApplyPatch, applyPatchToClaudeEvents, serializeMcpArgs, mcpCallToAgentEvent, isDenyOutput, McpArgError, MCP_TOOL_OPERATIONS, MCP_PASSTHROUGH_TOOLS, BATCH_TOTAL_KEYS, PATCH_TOTAL_BUDGET_MS, CODEX_HOST_NOTE };
+module.exports = { parseApplyPatch, applyPatchToClaudeEvents, serializeMcpArgs, mcpCallToAgentEvent, isDenyOutput, withCodexNote, McpArgError, MCP_TOOL_OPERATIONS, MCP_PASSTHROUGH_TOOLS, BATCH_TOTAL_KEYS, PATCH_TOTAL_BUDGET_MS, CODEX_HOST_NOTE, CODEX_DENY_NOTE };

@@ -42,6 +42,9 @@ const SUITES = [
   { name: 'session-layers', cmd: process.execPath, args: ['tests/test-session-layers.js'] },
   { name: 'migrate-v7', cmd: process.execPath, args: ['tests/test-migrate-v7.js'] },
   { name: 'agent-helpers', cmd: process.execPath, args: ['tests/test-agent-tests-helpers.js'] },
+  // CHG-20260815-04：Codex 宿主适配层与 MCP artifact server（纯 Node spawn process.execPath，无 shell shim / PATHEXT 雷区）
+  { name: 'codex-adapter', cmd: process.execPath, args: ['tests/test-codex-adapter.js'] },
+  { name: 'mcp-server', cmd: process.execPath, args: ['tests/test-mcp-server.js'] },
   { name: 'run-all-self', cmd: process.execPath, args: ['tests/test-run-all.js'] },
   // Windows：claude 经 npm 全局装为 claude.cmd shim，execFileSync 不走 PATHEXT 解析（且新版 Node 出于安全
   // 禁止无 shell 直跑 .cmd）→ ENOENT 瞬挂。shell:true 让 cmd.exe 经 PATHEXT 解析 claude.cmd。POSIX 保持 shell:false。
