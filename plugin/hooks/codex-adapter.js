@@ -210,16 +210,32 @@ function forward(hookFile, eventObj, extraArgs, sessionId) {
 
 /** 把真 hook 的输出翻译成 Codex 形态并退出。 */
 function emit(result, eventKey) {
-  if (result.stderr) {
-    const needsNote = /artifact-writer|reserve-artifact-id/.test(result.stderr) && !result.stderr.includes('Codex 宿主译注');
-    process.stderr.write(needsNote ? `${result.stderr.replace(/\n?$/, '\n')}${CODEX_DENY_NOTE}\n` : result.stderr);
+  const stderrText = String(result.stderr || '');
+  const needsNote = /artifact-writer|reserve-artifact-id/.test(stderrText) && !stderrText.includes('Codex 宿主译注');
+  const stderrOut = needsNote ? `${stderrText.replace(/\n?$/, '\n')}${CODEX_DENY_NOTE}\n` : stderrText;
+  if (result.status === 2) {
+    // 真 hook 的阻断用「exit 2 + stderr」表达(Claude/Linux Codex 都认);Windows Codex 0.147 实测该形态被记为
+    // hook Failed 且不阻断,只有 JSON 形态(Stop `{"decision":"block","reason"}` / PreToolUse `permissionDecision:"deny"`)
+    // 两平台都被正确当作 Blocked——adapter 统一翻译成 JSON,stdout 走 exit 0(2026-08-16 Windows Codex 探针三形态实测)。
+    const reason = stderrOut.trim() || 'PACEflow 阻断(hook exit 2,无文案)';
+    if (eventKey === 'pre-tool-use') {
+      process.stdout.write(denyOutput(reason));
+    } else if (eventKey === 'stop' || eventKey === 'user-prompt-submit') {
+      process.stdout.write(JSON.stringify({ decision: 'block', reason }));
+    } else {
+      // PostToolUse / 其他:exit 2 语义是「反馈」,Codex 同样接受 JSON decision:block(PostToolUse)
+      process.stdout.write(JSON.stringify({ decision: 'block', reason }));
+    }
+    process.stderr.write(stderrOut);
+    process.exitCode = 0;
+    return;
   }
-  if (result.status === 2) process.exit(2);
-  if (result.status !== 0) process.exit(result.status);
+  if (stderrOut) process.stderr.write(stderrOut);
+  if (result.status !== 0) { process.exitCode = result.status; return; }
   const text = String(result.stdout || '');
-  if (!text.trim()) process.exit(0);
+  if (!text.trim()) return;
   const parsed = tryParseJson(text);
-  if (parsed) { process.stdout.write(JSON.stringify(withCodexNote(parsed))); process.exit(0); }
+  if (parsed) { process.stdout.write(JSON.stringify(withCodexNote(parsed))); return; }
   const eventName = EVENT_NAMES[eventKey];
   if (eventKey === 'session-start' || eventKey === 'user-prompt-submit') {
     process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: eventName, additionalContext: text } }));
@@ -228,7 +244,6 @@ function emit(result, eventKey) {
   } else {
     process.stdout.write(JSON.stringify({ systemMessage: text.trim() }));
   }
-  process.exit(0);
 }
 
 function denyOutput(reason) {
@@ -281,7 +296,7 @@ function main() {
         const events = applyPatchToClaudeEvents(event);
         if (events.length === 0) {
           if (eventKey === 'pre-tool-use') { process.stdout.write(denyOutput('PACEflow 无法解析 apply_patch 内容(未找到 *** Add/Update/Delete File 头),按 fail-closed 阻止。请用标准 apply_patch 格式重试。')); }
-          process.exit(0);
+          return;
         }
         const t0 = Date.now();
         let last = { status: 0, stdout: '', stderr: '' };
@@ -289,7 +304,7 @@ function main() {
         for (const ev of events) {
           if (Date.now() - t0 > PATCH_TOTAL_BUDGET_MS) {
             if (eventKey === 'pre-tool-use') { process.stdout.write(denyOutput(`PACEflow 未能在预算内完成 ${events.length} 个文件的门检查(已用 ${Date.now() - t0}ms),按 fail-closed 阻止;请把 apply_patch 拆小后重试。`)); }
-            process.exit(0);
+            return;
           }
           const r = forward(hookFile, ev, extraArgs, sessionId);
           if (r.status === 2 || (eventKey === 'pre-tool-use' && isDenyOutput(r.stdout))) return emit(r, eventKey);
@@ -306,12 +321,18 @@ function main() {
       }
       if (eventKey === 'pre-tool-use' && toolName.startsWith(MCP_TOOL_PREFIX)) {
         const tool = toolName.slice(MCP_TOOL_PREFIX.length);
-        if (MCP_PASSTHROUGH_TOOLS.has(tool)) process.exit(0);
+        if (MCP_PASSTHROUGH_TOOLS.has(tool)) {
+          // 不经派遣门,但同样注入可信 session/cwd:server 的 _meta 兜底在部分宿主形态下缺 workspaces
+          //(Windows Codex 0.147 实测 reserve_artifact_id 报 no-context),hook 注入是更稳的来源(审计 P3-5)
+          const updatedInput = { ...(event.tool_input || {}), _pace_session_id: sessionId, _pace_cwd: event.cwd || '', _pace_turn_id: event.turn_id || '' };
+          process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow', updatedInput } }));
+          return;
+        }
         const batchKey = BATCH_TOTAL_KEYS.find((k) => Number((event.tool_input || {})[k]) > 1 || Number((event.tool_input || {})[k.replace(/_/g, '-')]) > 1);
-        if (batchKey) { process.stdout.write(denyOutput(`Codex 宿主 MVP 不支持 batch(${batchKey}>1):MCP 参数无法表达 --- CHG i/N --- 分块。请去掉该字段,逐条调用 create_chg / record_finding / update_finding。`)); process.exit(0); }
+        if (batchKey) { process.stdout.write(denyOutput(`Codex 宿主 MVP 不支持 batch(${batchKey}>1):MCP 参数无法表达 --- CHG i/N --- 分块。请去掉该字段,逐条调用 create_chg / record_finding / update_finding。`)); return; }
         let agentEvent;
         try { agentEvent = mcpCallToAgentEvent(event, resolveArtifactDir(event.cwd || process.cwd())); }
-        catch (e) { if (e instanceof McpArgError) { process.stdout.write(denyOutput(`PACEflow MCP 参数被拒:${e.message}`)); process.exit(0); } throw e; }
+        catch (e) { if (e instanceof McpArgError) { process.stdout.write(denyOutput(`PACEflow MCP 参数被拒:${e.message}`)); return; } throw e; }
         if (!agentEvent) return emit(forward(hookFile, event, extraArgs, sessionId), eventKey);
         const r = forward(hookFile, agentEvent, extraArgs, sessionId);
         if (r.status === 2 || isDenyOutput(r.stdout)) return emit(r, eventKey);
@@ -324,7 +345,7 @@ function main() {
         const out = { hookEventName: 'PreToolUse', permissionDecision: 'allow', updatedInput };
         if (ctxText) out.additionalContext = ctxText;
         process.stdout.write(JSON.stringify({ hookSpecificOutput: out }));
-        process.exit(0);
+        return;
       }
       return emit(forward(hookFile, event, extraArgs, sessionId), eventKey);
     }

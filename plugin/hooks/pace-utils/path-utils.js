@@ -453,7 +453,10 @@ function gitBranchName(cwd) {
 // 本函数(内含 git rev-parse fork,timeout 1s),UserPromptSubmit 等每轮 hook 在多 owner 场景
 // 延迟按 N 线性放大(实测 4 owner ≈ N×Git latency)。hook 进程生命周期短(单次调用),进程内
 // memo 无 mid-session checkout 失效风险;返回浅拷贝防 caller 突变污染缓存。
+// CHG-20260815-02/03 审计 P1-3:本模块也会被长驻进程(Codex MCP artifact server)require,长驻调用方必须
+// 在每次请求入口调 _clearExecCtxMemo(),否则 mid-session checkout 后 [branch::] 会写陈旧值。
 const _execCtxMemo = new Map();
+function _clearExecCtxMemo() { _execCtxMemo.clear(); }
 
 function executionContextForCwd(cwd) {
   const resolved = path.resolve(cwd || process.cwd());
@@ -484,6 +487,7 @@ function executionContextForCwd(cwd) {
 }
 
 module.exports = {
+  _clearExecCtxMemo,
   resolveProjectCwd,
   ts,
   todayISO,

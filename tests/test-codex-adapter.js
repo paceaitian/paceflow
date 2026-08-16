@@ -273,10 +273,15 @@ test('CA-E6c PreToolUse mcp__paceflow__update_chg 参数名非法 → deny(fail-
   assert.ok(/参数名非法/.test(denyOf(out)), out.stdout.slice(0, 300));
 });
 
-test('CA-E7 PreToolUse mcp__paceflow__reserve_artifact_id → 直接放行(不经派遣门)', () => {
+test('CA-E7 PreToolUse mcp__paceflow__reserve_artifact_id → 不经派遣门,但 allow+updatedInput 注入 _pace_session_id/_pace_cwd(Windows Codex 实测 _meta 缺 workspaces)', () => {
   const dir = makeProject('ca-e7');
   const out = runAdapter('pre-tool-use', { cwd: dir, stdin: codexBase(dir, { hook_event_name: 'PreToolUse', tool_name: 'mcp__paceflow__reserve_artifact_id', tool_input: { operation: 'create-chg' } }) });
-  assert.strictEqual(out.code, 0); assert.strictEqual(out.stdout.trim(), '');
+  assert.strictEqual(out.code, 0);
+  const j = JSON.parse(out.stdout);
+  assert.strictEqual(j.hookSpecificOutput.permissionDecision, 'allow');
+  assert.strictEqual(j.hookSpecificOutput.updatedInput._pace_cwd, dir);
+  assert.strictEqual(j.hookSpecificOutput.updatedInput._pace_session_id, 'codex-sess-01');
+  assert.strictEqual(j.hookSpecificOutput.updatedInput.operation, 'create-chg');
 });
 
 test('CA-E8 PreToolUse Bash 原样转发(bash-guard 生效:rm artifact 索引 → deny)', () => {
@@ -305,12 +310,15 @@ test('CA-E10 SessionStart(artifact)也包成 JSON,不附宿主提示(只附在 c
   assert.ok(!j.hookSpecificOutput.additionalContext.includes('宿主: Codex CLI'));
 });
 
-test('CA-E11 Stop:有 completed 未 verified 的 CHG → exit 2 + stderr 原样透传', () => {
+test('CA-E11 Stop:有 completed 未 verified 的 CHG → 真 hook exit 2+stderr 翻译成 JSON {decision:block}(exit 0;Windows Codex 不认 exit 2,两平台都认 JSON)', () => {
   const dir = makeProject('ca-e11', { task: '[x]', status: 'completed' });
   const out = runAdapter('stop', { cwd: dir, stdin: codexBase(dir, { hook_event_name: 'Stop', stop_hook_active: false, last_assistant_message: 'done' }) });
-  assert.strictEqual(out.code, 2, `stdout=${out.stdout} stderr=${out.stderr.slice(0, 200)}`);
-  assert.ok(out.stderr.length > 0);
-  if (/artifact-writer/.test(out.stderr)) assert.ok(out.stderr.includes('Codex 宿主译注'), 'Stop 阻断文案提到 artifact-writer 时也追加译注');
+  assert.strictEqual(out.code, 0, `stdout=${out.stdout} stderr=${out.stderr.slice(0, 200)}`);
+  const j = JSON.parse(out.stdout);
+  assert.strictEqual(j.decision, 'block');
+  assert.ok(/未验证|VERIFIED/.test(j.reason), j.reason.slice(0, 200));
+  assert.ok(j.reason.includes('Codex 宿主译注'), 'Stop 阻断文案提到 artifact-writer 时追加译注');
+  assert.ok(out.stderr.length > 0, 'stderr 仍透传原文供人读');
 });
 
 test('CA-E12 Stop:无未收口 CHG → exit 0,stdout 为空或合法 JSON(Codex 要求)', () => {

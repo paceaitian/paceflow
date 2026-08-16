@@ -114,6 +114,16 @@ const TOOLS = [
     },
   },
   {
+    name: 'archive_chg',
+    description: '归档/取消归档已终态的 CHG/HOTFIX(index-only):status=completed 且已 VERIFIED+REVIEWED → status archived + task.md 索引移 ARCHIVE + walkthrough 行;status=cancelled(全部任务 [-])→ 取消式归档([-] 行移 ARCHIVE);已 archived → 只修复索引/walkthrough。刚验证完的默认走 close_chg。',
+    inputSchema: {
+      type: 'object',
+      required: ['target', 'walkthrough_summary'],
+      properties: { target: { type: 'string' }, walkthrough_summary: { type: 'string', description: '一行完成/取消摘要(写入 walkthrough.md)' } },
+      additionalProperties: true,
+    },
+  },
+  {
     name: 'record_finding',
     description: '记录调研/观察/对比/bug-report finding:写 changes/findings/finding-yyyy-mm-dd-<slug>.md(body 原样)+ findings.md 索引行(最新在顶)。字段与 artifact-writer record-finding 同名。',
     inputSchema: {
@@ -137,8 +147,10 @@ const TOOLS = [
 ];
 
 const NOT_IMPLEMENTED = {
-  archive_chg: '后续版本', update_finding: '后续版本', record_correction: '后续版本', update_index: '后续版本',
+  update_finding: '后续版本', record_correction: '后续版本', update_index: '后续版本',
 };
+// MCP 规范:不支持客户端提的协议版本时回自己支持的版本(审计 P3-11),不无条件回显
+const SUPPORTED_PROTOCOLS = new Set(['2024-11-05', '2025-03-26', '2025-06-18', '2025-11-25']);
 
 // ---------------------------------------------------------------------------------------------
 // 工具实现
@@ -152,6 +164,10 @@ function fail(code, message, extra = {}) {
 }
 
 function baseCtx(call) {
+  // 长驻进程:pace-utils 的 artifact-dir 缓存 / execution-context memo 是按「hook 进程短命」设计的,每次调用先清
+  //(审计 P1-3:否则 mid-session set-artifact-root / git checkout 后写错根目录或 [branch::])
+  try { paceUtils._clearArtifactDirCache(); } catch (e) { /* 老版本无此导出时忽略 */ }
+  try { paceUtils._clearExecCtxMemo(); } catch (e) { /* 同上 */ }
   const artDir = paceUtils.getArtifactDir(call.cwd);
   return { sessionId: call.sessionId, cwd: call.cwd, turnId: call.turnId, artDir, host: 'codex' };
 }
@@ -168,7 +184,7 @@ function toolGetContext(call) {
   } catch (e) { active = [{ error: String(e.message || e) }]; }
   const info = {
     artifact_dir: ctx.artDir,
-    project_root: paceUtils.resolveEffectiveProjectRoot ? paceUtils.resolveEffectiveProjectRoot(call.cwd) : '',
+    project_root: paceUtils.resolveEffectiveProjectRoot ? (paceUtils.resolveEffectiveProjectRoot(call.cwd) || {}).projectRoot || '' : '',
     cwd: call.cwd,
     session_id: call.sessionId,
     execution_context: (paceUtils.executionContextForCwd(call.cwd) || {}).text || '',
@@ -184,7 +200,7 @@ function toolReserve(call, args) {
   if (args.new === true) cliArgs.push('--new');
   const r = spawnSync(process.execPath, [RESERVE_HELPER, ...cliArgs], {
     cwd: call.cwd, encoding: 'utf8', timeout: 20000,
-    env: { ...process.env, CLAUDE_CODE_SESSION_ID: call.sessionId, PACE_HOST: 'codex' },
+    env: { ...process.env, CLAUDE_CODE_SESSION_ID: call.sessionId, CODEX_THREAD_ID: call.sessionId, PACE_HOST: 'codex' },
   });
   const out = `${r.stdout || ''}${r.stderr ? `\n${r.stderr}` : ''}`.trim();
   if (r.status !== 0) return fail('reserve-failed', out || `reserve helper exit ${r.status}`);
@@ -207,10 +223,24 @@ function runOps(call, build) {
     return fail('internal-error', String(e && e.stack || e));
   }
   if (plan.idempotent) return ok(report({ operation: plan.operation, target: plan.id, status: 'SUCCESS', note: plan.note || 'no change', files: { created: [], modified: [] }, hookNotes: [] }), { status: 'SUCCESS', target: plan.id, idempotent: true });
+  const rel = (list) => (list || []).map((f) => path.relative(ctx.artDir, f));
+  // 前置管线(如补 task.md 的 ARCHIVE 标记)必须先落盘,后续主管线的 hook 预检才能看到
+  if (Array.isArray(plan.prelude) && plan.prelude.length) {
+    const pre = pipeline.runPipeline(ctx, plan.prelude);
+    if (!pre.ok) return fail(pre.code, `前置修复失败:${pre.reason}`, { files: { created: rel(pre.files.created), modified: rel(pre.files.modified) } });
+  }
   const r = pipeline.runPipeline(ctx, plan.ops);
-  if (!r.ok) return fail(r.code, `${r.reason}${r.partial ? '\n\n⚠️ 部分写入已落盘(Edit 阶段失败),请人工核对上述文件。' : ''}`, { files: r.files });
-  const relFiles = { created: r.files.created.map((f) => path.relative(ctx.artDir, f)), modified: r.files.modified.map((f) => path.relative(ctx.artDir, f)) };
-  return ok(report({ operation: plan.operation, target: plan.id, status: 'SUCCESS', files: relFiles, hookNotes: r.hookNotes, extra: plan.extra }), { status: 'SUCCESS', target: plan.id, files: relFiles, hookNotes: r.hookNotes });
+  if (!r.ok) {
+    const partialNote = r.partial ? `\n\n⚠️ 部分写入已落盘(Edit 阶段失败),请人工核对:${rel(r.files.modified).join(', ') || '(无)'}` : '';
+    return fail(r.code, `${r.reason}${partialNote}`, { files: { created: rel(r.files.created), modified: rel(r.files.modified) } });
+  }
+  const relFiles = { created: rel(r.files.created), modified: rel(r.files.modified) };
+  if (plan.closeOwner) {
+    // 收口后把 change owner 记录标 closed(Claude 侧由 SubagentStop 做,Codex 侧无该事件——审计 P3-16)
+    try { paceUtils.markChangeOwnerClosed(ctx.cwd, plan.id, { sessionId: ctx.sessionId, operation: 'close-chg' }); } catch (e) { /* owner 记录缺失时忽略 */ }
+  }
+  const notes = [...(plan.warnings || []).map((w) => `⚠️ ${w}`), ...(r.hookNotes || [])];
+  return ok(report({ operation: plan.operation, target: plan.id, status: 'SUCCESS', files: relFiles, hookNotes: notes, extra: plan.extra }), { status: 'SUCCESS', target: plan.id, files: relFiles, hookNotes: r.hookNotes, warnings: plan.warnings || [] });
 }
 
 function report({ operation, target, status, files, hookNotes, note, extra }) {
@@ -231,7 +261,8 @@ const TOOL_IMPL = {
     return { ...plan, operation: 'create-chg', extra: `索引行：\`${plan.indexLine}\`\n下一步:用户批准后调 update_chg action=approve-and-start target=${plan.id} task_id=T-001。` };
   }),
   update_chg: (call, args) => runOps(call, (ctx) => ({ ...ops.buildUpdateChg(ctx, args), operation: `update-chg action=${args.action}` })),
-  close_chg: (call, args) => runOps(call, (ctx) => ({ ...ops.buildCloseChg(ctx, args), operation: 'close-chg' })),
+  close_chg: (call, args) => runOps(call, (ctx) => ({ ...ops.buildCloseChg(ctx, args), operation: 'close-chg', closeOwner: true })),
+  archive_chg: (call, args) => runOps(call, (ctx) => ({ ...ops.buildArchiveChg(ctx, args), operation: 'archive-chg', closeOwner: true })),
   record_finding: (call, args) => runOps(call, (ctx) => ({ ...ops.buildRecordFinding(ctx, args), operation: 'record-finding' })),
 };
 
@@ -246,7 +277,8 @@ function replyError(id, code, message, data) { send({ jsonrpc: '2.0', id, error:
 function handle(msg) {
   const { id, method, params } = msg;
   if (method === 'initialize') {
-    return reply(id, { protocolVersion: (params && params.protocolVersion) || PROTOCOL_VERSION, capabilities: { tools: {} }, serverInfo: { name: SERVER_NAME, version: paceUtils.PACE_VERSION || '0.0.0' } });
+    const asked = params && params.protocolVersion;
+    return reply(id, { protocolVersion: SUPPORTED_PROTOCOLS.has(asked) ? asked : PROTOCOL_VERSION, capabilities: { tools: {} }, serverInfo: { name: SERVER_NAME, version: paceUtils.PACE_VERSION || '0.0.0' } });
   }
   if (method === 'notifications/initialized' || method === 'notifications/cancelled') return;
   if (method === 'ping') return reply(id, {});
@@ -258,11 +290,18 @@ function handle(msg) {
     const impl = TOOL_IMPL[name];
     if (!impl) return replyError(id, -32602, `unknown tool: ${name}`);
     const call = resolveCallContext(params);
-    if (name !== 'get_context' && !call.ok) return reply(id, fail('no-context', call.reason));
-    if (!call.ok) return reply(id, fail('no-context', call.reason));
+    if (!call.ok) {
+      // 诊断信息:把宿主实际给的 _meta 形态回给模型/用户(不同 Codex 版本/平台的 _meta 字段可能不同)
+      const metaPreview = JSON.stringify(params && params._meta ? params._meta : null).slice(0, 600);
+      return reply(id, fail('no-context', `${call.reason}\n\n宿主提供的 _meta:${metaPreview}\n若 PACEflow hooks 未启用/未信任(Codex /hooks),hook 注入的 _pace_cwd 也不会有——请先信任 hooks 再重试。`));
+    }
     try {
       const result = impl(call, businessArgs(rawArgs));
-      if (call.warnings.length && result && result.structuredContent) result.structuredContent.contextWarnings = call.warnings;
+      if (call.warnings.length && result) {
+        if (result.structuredContent) result.structuredContent.contextWarnings = call.warnings;
+        // 上下文告警(如 hook 注入与宿主 _meta 的 session/cwd 不一致)必须让人读报告可见(审计 P2-5)
+        if (result.content && result.content[0] && typeof result.content[0].text === 'string') result.content[0].text += `\n\n**上下文告警**：\n${call.warnings.map((w) => `- ${w}`).join('\n')}`;
+      }
       return reply(id, result);
     } catch (e) {
       return reply(id, fail('internal-error', String(e && e.stack || e)));

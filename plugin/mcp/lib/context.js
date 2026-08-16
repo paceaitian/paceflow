@@ -5,6 +5,14 @@
 // 优先级:hook 注入 > _meta > env——hook 注入是 PACEflow 自己的门写的,最可信;两者不一致时以 hook 为准并记 warning。
 'use strict';
 const path = require('path');
+const fs = require('fs');
+
+// cwd 归一为 realpath:macOS 的 os.tmpdir()/var/… 是 /private/var/… 的符号链接,hook 子进程的 process.cwd()
+// 返回真实路径而 server 传入的 file_path 若按未解析路径拼出,artifact 完整性门会判「文件不在项目内」而放行
+// (PR #6 macOS CI:MS-E3 缺 reservation 的 create_chg 未被 deny)。所有路径以 realpath 为准即可消除该分叉。
+function realpathSafe(p) {
+  try { return fs.realpathSync(p); } catch (e) { return path.resolve(p); }
+}
 
 /**
  * @param {object} params - tools/call 的 params(含 _meta / arguments)
@@ -28,12 +36,14 @@ function resolveCallContext(params) {
   let sessionId = hookSession || metaSession || envSession;
   let cwd = hookCwd || metaCwd;
   let source = hookSession ? 'hook' : (metaSession ? 'meta' : (envSession ? 'env' : 'none'));
-  if (hookSession && metaSession && hookSession !== metaSession) warnings.push(`session 不一致:hook=${hookSession} meta=${metaSession},以 hook 为准`);
-  if (hookCwd && metaCwd && path.resolve(hookCwd) !== path.resolve(metaCwd)) warnings.push(`cwd 不一致:hook=${hookCwd} meta=${metaCwd},以 hook 为准`);
+  // `_pace_*` 与模型自填参数走同一通道(hook 注入时会覆盖模型值,但 hooks 未启用/未信任时模型值原样到达);
+  // 与宿主 _meta 冲突即 fail-closed——不给「以哪个为准」留口子(审计 P2-5:否则可指到别的项目/别的 session)
+  if (hookSession && metaSession && hookSession !== metaSession) return { ok: false, reason: `session 不一致:hook 注入=${hookSession},宿主 _meta=${metaSession}——疑似参数伪造或 hooks 未生效,拒绝执行`, sessionId: '', cwd: '', turnId: '', source, warnings };
+  if (hookCwd && metaCwd && realpathSafe(path.resolve(hookCwd)) !== realpathSafe(path.resolve(metaCwd))) return { ok: false, reason: `cwd 不一致:hook 注入=${hookCwd},宿主 _meta workspace=${metaCwd}——拒绝跨项目写入`, sessionId: '', cwd: '', turnId: '', source, warnings };
   if (workspaces.length > 1) warnings.push(`多 workspace(${workspaces.length}),取第一个:${metaCwd}`);
   if (!sessionId) return { ok: false, reason: '无法确定 session:调用缺 _meta.x-codex-turn-metadata 与 hook 注入参数,且无 CODEX_THREAD_ID/CLAUDE_CODE_SESSION_ID', sessionId: '', cwd: '', turnId: '', source, warnings };
   if (!cwd) return { ok: false, reason: '无法确定项目 cwd:调用缺 _meta.workspaces 与 hook 注入的 _pace_cwd', sessionId, cwd: '', turnId: '', source, warnings };
-  return { ok: true, sessionId, cwd: path.resolve(cwd), turnId: hookTurn || metaTurn, source, warnings };
+  return { ok: true, sessionId, cwd: realpathSafe(path.resolve(cwd)), turnId: hookTurn || metaTurn, source, warnings };
 }
 
 function str(v) { return v === undefined || v === null ? '' : String(v).trim(); }

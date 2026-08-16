@@ -8,6 +8,11 @@ const path = require('path');
 
 const paceUtils = require('../../hooks/pace-utils');
 
+// 所有 artifact 读取统一归一为 LF(pre-tool-use.js 会在 Edit 前把 CRLF artifact 落盘归一为 LF,spec §9.1;
+// 生成器若按原始 CRLF 切锚点会全部落空——CHG-02/03 审计 P0-1)。写回也一律 LF。
+const nl = '\n';
+function readLF(file) { return paceUtils.normalizeLineEndings(fs.readFileSync(file, 'utf8')); }
+
 const ARCHIVE_MARKER = '<!-- ARCHIVE -->';
 const APPROVED = '<!-- APPROVED -->';
 const VERIFIED = '<!-- VERIFIED -->';
@@ -55,6 +60,9 @@ function normalizeTasks(tasks) {
     text = text.trim();
     if (!text) throw new OpError('missing-fields', `tasks 第 ${i + 1} 项为空`);
     return { id, text };
+  }).map((t, i, arr) => {
+    if (arr.findIndex((x) => x.id === t.id) !== i) throw new OpError('format-violation', `tasks 任务编号重复:${t.id}`);
+    return t;
   });
 }
 
@@ -83,7 +91,11 @@ function buildCreateChg(ctx, p) {
   if (!title) throw new OpError('missing-fields', 'missing-fields: title');
   const tasks = normalizeTasks(p.tasks);
   const kind = idKind(id);
-  const stem = `${idToStem(id)}-${slugify(p.slug || title, kind)}`;
+  const warnings = [];
+  const slugSrc = String(p.slug || '').trim();
+  const slug = slugify(slugSrc || title, kind);
+  if (!slugSrc && slug === kind) warnings.push(`title 无 ASCII 词且未传 slug,文件名回退为 ${idToStem(id)}-${kind}.md;建议传英文 kebab-case slug(spec create-chg.md「文件名 slug」)`);
+  const stem = `${idToStem(id)}-${slug}`;
   const prefix = String(p.reserved_file_prefix || '').replace(/\\/g, '/').replace(/<slug>\.md$/i, '');
   const expectedPrefix = `changes/${idToStem(id)}-`;
   if (prefix && prefix !== expectedPrefix) throw new OpError('format-violation', `reserved_file_prefix(${prefix})与 reserved_id(${id})不匹配`);
@@ -144,16 +156,15 @@ function buildCreateChg(ctx, p) {
   const tag = kind === 'hotfix' ? '#hotfix' : '#change';
   const indexLine = `- [ ] [[${stem}|${idAlias(id)}]] ${title} ${tag} [tasks:: ${taskRange(tasks)}]${execCtx ? ` ${execCtx}` : ''}`;
   const taskEdit = insertBeforeArchiveEdit(taskAbs, indexLine);
-  return { ops: [{ kind: 'write', file: detailAbs, content }, taskEdit], id, detailRel, indexLine, stem };
+  return { ops: [{ kind: 'write', file: detailAbs, content }, taskEdit], id, detailRel, indexLine, stem, warnings };
 }
 
 /** 索引行插到 <!-- ARCHIVE --> 之前(活跃区末尾),与既有索引行连续、与 ARCHIVE 之间保留一个空行 */
 function insertBeforeArchiveEdit(indexAbs, line) {
   if (!fs.existsSync(indexAbs)) throw new OpError('target-not-found', `索引文件不存在:${indexAbs}`);
-  const raw = fs.readFileSync(indexAbs, 'utf8');
+  const raw = readLF(indexAbs);
   const idx = raw.indexOf(ARCHIVE_MARKER);
   if (idx < 0) throw new OpError('format-violation', `${path.basename(indexAbs)} 缺 ${ARCHIVE_MARKER} 标记`);
-  const nl = raw.includes('\r\n') ? '\r\n' : '\n';
   // 以 ARCHIVE 行为锚:old = ARCHIVE 前的空行区 + 标记;new = 索引行 + 空行 + 标记
   const before = raw.slice(0, idx);
   const trailingBlank = before.match(/(\r?\n)+$/);
@@ -170,11 +181,12 @@ function insertBeforeArchiveEdit(indexAbs, line) {
 // ---------------------------------------------------------------------------------------------
 
 function loadDetail(ctx, target) {
+  if (!fs.existsSync(path.join(ctx.artDir, 'changes'))) throw new OpError('not-pace-project', `${path.join(ctx.artDir, 'changes')} 不存在`);
   const id = normalizeId(target);
   if (!id) throw new OpError('format-violation', `target 非法:${target}(应为 CHG-YYYYMMDD-NN / HOTFIX-YYYYMMDD-NN)`);
   const fp = paceUtils.detailPathForId(ctx.artDir, id);
   if (!fp || !fs.existsSync(fp)) throw new OpError('target-not-found', `target-not-found: ${id}`);
-  const content = fs.readFileSync(fp, 'utf8');
+  const content = readLF(fp);
   return { id, path: fp, stem: path.basename(fp, '.md'), content, fm: paceUtils.parseFrontmatter(content) };
 }
 
@@ -213,11 +225,21 @@ function deriveStatusAfterTasks(statuses, current) {
 }
 const STATUS_TO_CHECKBOX = { planned: '[ ]', 'in-progress': '[/]', completed: '[x]', cancelled: '[-]', archived: '[x]' };
 
+/** 读 task.md 目标索引行当前 checkbox(找不到返回 '') */
+function currentIndexCheckbox(ctx, detail) {
+  const taskAbs = path.join(ctx.artDir, 'task.md');
+  if (!fs.existsSync(taskAbs)) return '';
+  const raw = readLF(taskAbs);
+  const re = new RegExp(`^- (\\[[ x/!\\-]\\]) \\[\\[(?:${escapeRe(detail.stem)}|${escapeRe(idToStem(detail.id))})(?:\\|[^\\]]+)?\\]\\]`, 'm');
+  const m = raw.match(re);
+  return m ? m[1] : '';
+}
+
 /** task.md 索引行 checkbox 联动 op(找 `- [<old>] [[<stem>|…]]` 或 `[[<id-lower>]]`) */
 function indexCheckboxOp(ctx, detail, newCheckbox) {
   const taskAbs = path.join(ctx.artDir, 'task.md');
   if (!fs.existsSync(taskAbs)) throw new OpError('target-not-found', 'task.md 不存在');
-  const raw = fs.readFileSync(taskAbs, 'utf8');
+  const raw = readLF(taskAbs);
   const stem = detail.stem;
   const re = new RegExp(`^- \\[[ x/!\\-]\\] \\[\\[${escapeRe(stem)}(?:\\|[^\\]]+)?\\]\\][^\\r\\n]*$`, 'm');
   let m = raw.match(re);
@@ -241,7 +263,6 @@ function approvedInsertOp(detail) {
   for (let i = 0; i < lines.length; i++) if (/^- \[[ x/!\-]\] T-\d{3}\b/.test(lines[i])) lastIdx = i;
   if (lastIdx < 0) throw new OpError('format-violation', '## 任务清单 段无任务行');
   const lastLine = lines[lastIdx];
-  const nl = detail.content.includes('\r\n') ? '\r\n' : '\n';
   // old = 最后任务行 + 紧随其后的空行(若有);new = 任务行 + 空行 + APPROVED + 空行
   const afterIdx = detail.content.indexOf(lastLine) + lastLine.length;
   const after = detail.content.slice(afterIdx);
@@ -255,13 +276,11 @@ function approvedInsertOp(detail) {
 function markerAfterOp(detail, anchorMarker, newMarker) {
   const idx = detail.content.indexOf(anchorMarker);
   if (idx < 0) throw new OpError('format-violation', `缺 ${anchorMarker}`);
-  const nl = detail.content.includes('\r\n') ? '\r\n' : '\n';
   return { kind: 'edit', file: detail.path, oldString: anchorMarker, newString: `${anchorMarker}${nl}${newMarker}` };
 }
 
 /** 在某 `## 段` 末尾(下一个 `## ` 之前 / EOF)追加若干行 */
 function appendToSectionOp(detail, sectionTitle, newLines, { createIfMissing = false, afterSection = '', blankLineBefore = false } = {}) {
-  const nl = detail.content.includes('\r\n') ? '\r\n' : '\n';
   const content = detail.content;
   const headerRe = new RegExp(`^## ${escapeRe(sectionTitle)}[ \\t]*\\r?\\n`, 'm');
   const h = content.match(headerRe);
@@ -336,6 +355,7 @@ function buildUpdateChg(ctx, p) {
   if (action === 'update-status') {
     const section = String(p.section || 'tasks');
     if (section !== 'tasks') throw new OpError('format-violation', 'update-status 仅适用于 section=tasks');
+    if (status === 'archived' || status === 'cancelled' || !fmIsNull(detail.fm, 'archived-date')) throw new OpError('format-violation', `status=${status} 已是终态(archived-date 已填),不可再改任务状态(审计 P2-3:否则 status 会被打回 completed 而索引仍在归档区)`);
     const taskId = String(p.task_id || '').trim().toUpperCase();
     const ns = normalizeStatusToken(p.new_status);
     if (!taskId || !ns) throw new OpError('missing-fields', 'missing-fields: task_id / new_status');
@@ -350,9 +370,11 @@ function buildUpdateChg(ctx, p) {
     const updated = statuses.map((s, i) => (ids[i] === taskId ? ns.slice(1, 2) : s));
     const newStatus = deriveStatusAfterTasks(updated, status);
     if (newStatus !== status) ops.push(fmSetOp(detail, 'status', newStatus));
+    // cancelled 的归档时刻只由 archived-date 承载(schema 合同 cancelled 必填 archived-date;审计 P1-2:否则 Stop 硬拦无出口)
+    if (newStatus === 'cancelled' && fmIsNull(detail.fm, 'archived-date')) ops.push(fmSetOp(detail, 'archived-date', localIsoNow()));
     let newCheckbox = null;
     if (ns === '[!]') newCheckbox = '[!]';
-    else if (ns === '[/]') newCheckbox = '[/]';
+    else if (ns === '[/]' && currentIndexCheckbox(ctx, detail) === '[!]') newCheckbox = '[/]'; // 只在从 [!] 恢复时改索引(update-chg.md 步骤 4)
     else if (newStatus !== status) newCheckbox = STATUS_TO_CHECKBOX[newStatus];
     if (newCheckbox) { const idxOp = indexCheckboxOp(ctx, detail, newCheckbox); if (idxOp) ops.push(idxOp); }
     if (ns === '[!]') ops.push(appendToSectionOp(detail, '工作记录', [`| ${todayLocal()} | ${taskId} 暂停/阻塞：${String(p.status_reason).trim().replace(/\|/g, '\\|')} |`]));
@@ -367,7 +389,8 @@ function buildUpdateChg(ctx, p) {
     if (!content) throw new OpError('missing-fields', 'missing-fields: content');
     let lines = content.split(/\r?\n/);
     if (section === 'work-record' && !/^\|/.test(lines[0])) lines = [`| ${todayLocal()} | ${content.replace(/\r?\n/g, ' ').replace(/\|/g, '\\|')} |`];
-    ops.push(appendToSectionOp(detail, SECTION_TITLES[section], lines, { createIfMissing: section === 'research', afterSection: '工作记录' }));
+    const lastKnown = ['审查记录', '工作记录'].find((t) => new RegExp(`^## ${t}[ \\t]*\\r?\\n`, 'm').test(detail.content)) || '工作记录';
+    ops.push(appendToSectionOp(detail, SECTION_TITLES[section], lines, { createIfMissing: section === 'research', afterSection: lastKnown, blankLineBefore: section !== 'work-record' }));
     return { ops, id: detail.id };
   }
 
@@ -470,6 +493,10 @@ function buildCloseChg(ctx, p) {
   const walkSummary = String(p.walkthrough_summary || '').trim();
   const notes = normalizeImplNotes(p.implementation_notes);
   const missing = [];
+  const detailPeek = loadDetail(ctx, p.target);
+  const knownIds = new Set((taskSection(detailPeek.content).match(/^- \[[ x/!\-]\] (T-\d{3})\b/gm) || []).map((l) => l.replace(/^- \[[ x/!\-]\] /, '')));
+  const unknown = notes.map((n) => n.id).filter((id) => !knownIds.has(id));
+  if (unknown.length) throw new OpError('format-violation', `implementation_notes 含任务清单里不存在的任务:${unknown.join(', ')}`);
   if (!reviewSource) missing.push('review_source');
   if (!reviewFindings) missing.push('review_findings');
   if (!verifySummary) missing.push('verify_summary');
@@ -493,12 +520,11 @@ function buildCloseChg(ctx, p) {
   const taskAbs = path.join(ctx.artDir, 'task.md');
   const walkAbs = path.join(ctx.artDir, 'walkthrough.md');
   if (!fs.existsSync(taskAbs)) throw new OpError('target-not-found', 'task.md 不存在');
-  const taskRaw = fs.readFileSync(taskAbs, 'utf8');
-  if (!taskRaw.includes(ARCHIVE_MARKER)) throw new OpError('format-violation', 'archive marker missing');
+  const marker = ensureArchiveMarker(taskAbs, detail);
+  const taskRaw = marker.raw; const preOps = marker.ops;
 
   // 逐步在内存里演化文本(每步产生一个 Edit op,前后连贯),避免多 Edit 锚点互相踩
   let content = detail.content;
-  const nl = content.includes('\r\n') ? '\r\n' : '\n';
   const ops = [];
   const edit = (oldString, newString) => { if (oldString === newString) return; ops.push({ kind: 'edit', file: detail.path, oldString, newString }); content = content.replace(oldString, () => newString); };
   const cur = () => ({ ...detail, content, fm: paceUtils.parseFrontmatter(content) });
@@ -553,13 +579,29 @@ function buildCloseChg(ctx, p) {
   // 7. walkthrough.md prepend
   ops.push(...walkthroughOps(walkAbs, detail, walkSummary, idxOps.execCtx));
   const extra = `归档:task.md 索引行移到 ARCHIVE 下方;walkthrough.md 新增一行。`;
-  return { ops, id: detail.id, extra };
+  // 补 ARCHIVE 标记必须先于详情归档落盘(hook 拒绝「根索引缺 ARCHIVE 时先把详情归档」),作为独立前置管线
+  return { ops, prelude: preOps, id: detail.id, extra };
 }
 
-function archiveIndexOps(taskAbs, raw, detail) {
+/** spec close-chg/archive-chg §0:task.md 缺 <!-- ARCHIVE --> 但目标活跃索引行存在 → 文件末尾补独占行;两处都没有才拒绝 */
+function ensureArchiveMarker(taskAbs, detail) {
+  let raw = readLF(taskAbs);
+  const ops = [];
+  if (!raw.includes(ARCHIVE_MARKER)) {
+    const hasRow = new RegExp(`\\[\\[(?:${escapeRe(detail.stem)}|${escapeRe(idToStem(detail.id))})(?:\\|[^\\]]+)?\\]\\]`).test(raw);
+    if (!hasRow) throw new OpError('format-violation', 'archive marker missing');
+    const tail = raw.match(/(\r?\n)*$/)[0];
+    const trimmed = raw.slice(0, raw.length - tail.length);
+    const lastLine = trimmed.split(/\r?\n/).pop();
+    ops.push({ kind: 'edit', file: taskAbs, oldString: `${lastLine}${tail}`, newString: `${lastLine}${nl}${nl}${ARCHIVE_MARKER}${nl}` });
+    raw = `${trimmed}${nl}${nl}${ARCHIVE_MARKER}${nl}`;
+  }
+  return { raw, ops };
+}
+
+function archiveIndexOps(taskAbs, raw, detail, finalCheckbox = '[x]') {
   const stem = detail.stem;
   const lineRe = new RegExp(`^- \\[[ x/!\\-]\\] \\[\\[(?:${escapeRe(stem)}|${escapeRe(idToStem(detail.id))})(?:\\|[^\\]]+)?\\]\\][^\\r\\n]*$`, 'm');
-  const nl = raw.includes('\r\n') ? '\r\n' : '\n';
   const archiveIdx = raw.indexOf(ARCHIVE_MARKER);
   const activePart = raw.slice(0, archiveIdx);
   const archivedPart = raw.slice(archiveIdx);
@@ -567,7 +609,7 @@ function archiveIndexOps(taskAbs, raw, detail) {
   const mActive = activePart.match(lineRe);
   if (mActive) {
     const line = mActive[0];
-    const archivedLine = `- [x] ${line.slice(6)}`;
+    const archivedLine = `- ${finalCheckbox} ${line.slice(6)}`;
     const ops = [];
     // 删活跃行(连同其换行)
     const withNl = raw.includes(`${line}${nl}`) ? `${line}${nl}` : line;
@@ -583,8 +625,7 @@ function archiveIndexOps(taskAbs, raw, detail) {
 
 function walkthroughOps(walkAbs, detail, summary, execCtx) {
   if (!fs.existsSync(walkAbs)) throw new OpError('target-not-found', 'walkthrough.md 不存在');
-  const raw = fs.readFileSync(walkAbs, 'utf8');
-  const nl = raw.includes('\r\n') ? '\r\n' : '\n';
+  const raw = readLF(walkAbs);
   const stem = detail.stem;
   const alias = detail.stem === idToStem(detail.id) ? '' : `\\|${idAlias(detail.id)}`;
   const link = alias ? `[[${stem}${alias}]]` : `[[${stem}]]`;
@@ -599,12 +640,52 @@ function walkthroughOps(walkAbs, detail, summary, execCtx) {
     return [];
   }
   const row = `| ${todayLocal()} | ${link} ${summary.replace(/\r?\n/g, ' ').replace(/\|/g, '\\|')}${execCtx ? ` ${execCtx}` : ''} | ${detail.id} |`;
-  const sepRe = /^\| --- \| --- \| --- \|[ \t]*\r?\n/m;
-  const sep = raw.match(sepRe);
-  if (sep) return [{ kind: 'edit', file: walkAbs, oldString: sep[0], newString: `${sep[0]}${row}${nl}` }];
+  // 锚点必须全文唯一(Edit 语义):归档区可能也保留了一份表头+分隔行(审计 P1-1),故用「## 最近工作 标题 … 分隔行」
+  // 整段作为锚点(标题唯一);无表头时在标题下补表头
   const hdr = raw.match(/^## 最近工作[ \t]*\r?\n/m);
   if (!hdr) throw new OpError('format-violation', 'walkthrough.md 缺 ## 最近工作');
+  const afterHdr = raw.slice(hdr.index + hdr[0].length);
+  const sepIn = afterHdr.match(/^(?:[ \t]*\r?\n)*\| 日期 \| 完成内容 \| 关联变更 \|[ \t]*\r?\n\| --- \| --- \| --- \|[ \t]*\r?\n/);
+  if (sepIn) {
+    const anchor = `${hdr[0]}${sepIn[0]}`;
+    return [{ kind: 'edit', file: walkAbs, oldString: anchor, newString: `${anchor}${row}${nl}` }];
+  }
   return [{ kind: 'edit', file: walkAbs, oldString: hdr[0], newString: `${hdr[0]}${nl}| 日期 | 完成内容 | 关联变更 |${nl}| --- | --- | --- |${nl}${row}${nl}` }];
+}
+
+// ---------------------------------------------------------------------------------------------
+// archive-chg(审计 P1-2:cancelled 在 Codex 上无归档出口 → 补最小实现;index-only 归档 / 取消式归档 / repair)
+// ---------------------------------------------------------------------------------------------
+
+function buildArchiveChg(ctx, p) {
+  const walkSummary = String(p.walkthrough_summary || '').trim();
+  if (!walkSummary) throw new OpError('missing-fields', 'missing-fields: walkthrough_summary');
+  const detail = loadDetail(ctx, p.target);
+  const status = fmValue(detail.fm, 'status');
+  if (!['completed', 'archived', 'cancelled'].includes(status)) throw new OpError('format-violation', `status not terminal:${status}(planned/in-progress 请先 close_chg 或 update-status)`);
+  const statuses = taskStatuses(detail.content);
+  if (statuses.some((s) => s === ' ' || s === '/')) throw new OpError('format-violation', 'tasks not done:存在 [ ]/[/] 任务');
+  if (statuses.some((s) => s === '!')) throw new OpError('format-violation', 'blocked tasks:存在 [!] 任务');
+  if (status === 'cancelled' && statuses.some((s) => s !== '-')) throw new OpError('format-violation', 'cancelled tasks not all skipped');
+  const hasVer = detail.content.includes(VERIFIED); const hasVerDate = !fmIsNull(detail.fm, 'verified-date');
+  const hasRev = detail.content.includes(REVIEWED); const hasRevDate = !fmIsNull(detail.fm, 'reviewed-date');
+  if (status !== 'cancelled') {
+    if (hasVer !== hasVerDate) throw new OpError('format-violation', 'verification state inconsistent');
+    if (!hasVer) throw new OpError('format-violation', 'not verified:请验证通过后用 close_chg,或先 update_chg action=verify');
+    if (hasRev !== hasRevDate) throw new OpError('format-violation', 'review state inconsistent');
+    if (!hasRev) throw new OpError('format-violation', 'not reviewed:请编排对抗审计后用 close_chg,或先 update_chg action=review');
+  }
+  const taskAbs = path.join(ctx.artDir, 'task.md');
+  const walkAbs = path.join(ctx.artDir, 'walkthrough.md');
+  if (!fs.existsSync(taskAbs)) throw new OpError('target-not-found', 'task.md 不存在');
+  const ops = [];
+  if (status === 'completed') ops.push(fmSetOp(detail, 'status', 'archived'));
+  if (fmIsNull(detail.fm, 'archived-date')) ops.push(fmSetOp(detail, 'archived-date', localIsoNow()));
+  const marker = ensureArchiveMarker(taskAbs, detail);
+  const idxOps = archiveIndexOps(taskAbs, marker.raw, detail, status === 'cancelled' ? '[-]' : '[x]');
+  ops.push(...idxOps.ops);
+  ops.push(...walkthroughOps(walkAbs, detail, walkSummary, idxOps.execCtx));
+  return { ops, prelude: marker.ops, id: detail.id, extra: status === 'cancelled' ? '取消式归档:索引行 [-] 移到 ARCHIVE 下方,verified/reviewed 保持 null。' : `归档:status→archived,索引行移到 ARCHIVE 下方,walkthrough 行已补。` };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -652,7 +733,9 @@ function buildRecordFinding(ctx, p) {
   if (related.length) meta.push(`[change:: ${related.join(', ')}]`);
   const merges = normalizeLinkList(p.merges);
   if (merges.length) meta.push(`[merges:: ${merges.join(', ')}]`);
-  const line = `- ${FINDING_STATUS_CHECKBOX[status]} [[${stem}|${title.replace(/\|/g, '/').replace(/\]\]/g, ')')}]] — ${summary.replace(/\r?\n/g, ' ')} #finding ${meta.join(' ')}`;
+  // wikilink 别名内 `|` 与 `]]` 会切坏链接:| 换全角｜,]] 拆成 ] ](保留可读性,不静默改写为其他字符——审计 P3-3)
+  const safeTitle = title.replace(/\|/g, '｜').replace(/\]\]/g, '] ]');
+  const line = `- ${FINDING_STATUS_CHECKBOX[status]} [[${stem}|${safeTitle}]] — ${summary.replace(/\r?\n/g, ' ').replace(/\|/g, '｜')} #finding ${meta.join(' ')}`;
   return { ops: [{ kind: 'write', file: detailAbs, content }, findingIndexInsertOp(idxAbs, line)], id: stem.toUpperCase(), stem, extra: `索引行：\`${line}\`` };
 }
 
@@ -674,19 +757,31 @@ function normalizeLinkList(v) {
 
 /** findings.md:插到活跃区第一个 finding 索引行之前;无索引行时插到活跃区最后一个标题下方 */
 function findingIndexInsertOp(idxAbs, line) {
-  const raw = fs.readFileSync(idxAbs, 'utf8');
-  const nl = raw.includes('\r\n') ? '\r\n' : '\n';
+  const raw = readLF(idxAbs);
   const archiveIdx = raw.indexOf(ARCHIVE_MARKER);
   const active = archiveIdx >= 0 ? raw.slice(0, archiveIdx) : raw;
   const first = active.match(/^- \[[ x/!\-]\] \[\[finding-[^\r\n]*$/m);
-  if (first) return { kind: 'edit', file: idxAbs, oldString: first[0], newString: `${line}${nl}${first[0]}` };
+  if (first) {
+    // 索引行文本理论上唯一;若归档区有一模一样的行,带上前一行做锚点
+    if (raw.indexOf(first[0]) !== raw.lastIndexOf(first[0])) {
+      const before = raw.slice(0, raw.indexOf(first[0]));
+      const prevLine = before.replace(/(\r?\n)+$/, '').split(/\r?\n/).pop() || '';
+      const anchor = `${prevLine}${nl}${nl}${first[0]}`;
+      if (raw.includes(anchor)) return { kind: 'edit', file: idxAbs, oldString: anchor, newString: `${prevLine}${nl}${nl}${line}${nl}${first[0]}` };
+    }
+    return { kind: 'edit', file: idxAbs, oldString: first[0], newString: `${line}${nl}${first[0]}` };
+  }
+  // 活跃区无 finding 行:插到 <!-- ARCHIVE --> 之前(全文唯一锚点;审计 P2-1:标题在归档区可能重复)
+  if (archiveIdx >= 0) return insertBeforeArchiveEdit(idxAbs, line);
   const headings = [...active.matchAll(/^##+ [^\r\n]*\r?\n/gm)];
   if (!headings.length) throw new OpError('format-violation', 'findings.md 活跃区无标题可锚定');
   const last = headings[headings.length - 1];
+  if (raw.indexOf(last[0]) !== raw.lastIndexOf(last[0])) throw new OpError('format-violation', `findings.md 标题「${last[0].trim()}」不唯一且无 <!-- ARCHIVE --> 标记,无法定位插入点`);
   return { kind: 'edit', file: idxAbs, oldString: last[0], newString: `${last[0]}${nl}${line}${nl}` };
 }
 
 module.exports.buildCloseChg = buildCloseChg;
+module.exports.buildArchiveChg = buildArchiveChg;
 module.exports.buildRecordFinding = buildRecordFinding;
 module.exports.normalizeImplNotes = normalizeImplNotes;
 module.exports.PLACEHOLDER_LINE = PLACEHOLDER_LINE;

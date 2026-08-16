@@ -46,7 +46,7 @@ technical-decision: <How>
 2. 为当前 CHG/HOTFIX 分配局部任务 ID：按输入顺序生成 `T-001...T-NNN`；若迁移/测试输入已显式带 `T-NNN:`，保留该 CHG 内编号。任务编号始终是 CHG 局部的，编号来源限于本次输入顺序或输入自带的 `T-NNN`。
 3. 写入前生成并自检详情文件 payload（frontmatter 顺序、任务清单、4 段结构）
 4. 按 title 生成描述性 slug（英文 kebab-case），用 reserved-file-prefix 拼成 `changes/chg-yyyymmdd-nn-<slug>.md` 后 Write（详情文件结构见下，slug 规则见下方「文件名 slug」段）
-5. Read + Edit `task.md` 添加索引行（task.md 是唯一 CHG 索引；活跃任务区按时间倒序插入顶部，按下方"索引插入契约"组织替换片段）
+5. Read + Edit `task.md` 添加索引行（task.md 是唯一 CHG 索引；新行插在活跃区末尾、`<!-- ARCHIVE -->` 之前——与下方「索引插入契约」一致；不要插到活跃区顶部）
 6. 基于 payload + Edit 成功 + hook 反馈做低成本验证；验证只依据这三项信号即可，仅当 hook 报告本次目标问题时才重新 Read 详情文件或索引文件
 
 资源约束（本操作只触达详情文件与 `task.md` 一个索引）：
