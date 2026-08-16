@@ -24,6 +24,7 @@ tests/*
 !tests/run-all.js
 !tests/test-run-all.js
 !tests/test-codex-adapter.js
+!tests/test-mcp-server.js
 # 例外：agent 测试框架是产品资产（v6.0.0 起），但运行结果除外
 !tests/agent-tests/
 tests/agent-tests/results/
