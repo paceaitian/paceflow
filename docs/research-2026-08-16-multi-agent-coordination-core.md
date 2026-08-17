@@ -1,13 +1,16 @@
 # 多 agent 协调核：研究结论与架构提案（2026-08-16）
 
-> **状态**：research + design proposal，**pre-implementation**（尚未立项实现；阶段 1「Claude Code 走 MCP 替代 artifact-writer」已单独立项，本文的协调核是其后的阶段 2/3）。
+> **状态**：historical candidate design / **pre-implementation**。本文按「多台开发机上的 Claude/Codex 编程 agent」写成，机制研究仍可复用，但产品边界和 local-first 路线已不再有效。
+> **2026-08-17 最终范围纠正与价值门**：目标是面向通用远端 agent 的任务/进度看板与下发/认领通道。中心只管理工作协调状态，**不管理 agent 的本机权限、工具、模型、进程或 host**；用户个人服务器只是 dogfood 场景。此前针对本地编程协作给出的 NO-GO 已撤销；当前决策为 **研究与最小远端协调原型 GO**。详见 `research-2026-08-17-coordination-core-value-gate.md` 和 `research-2026-08-17-remote-agent-coordination-center.md`。
+> **任务域确认**：代码实现、独立审查、日志诊断和服务器运维都会进入中心，但中心将 kind/领域内容视为开放扩展或 artifact 引用，不内建 handler/权限体系。
+> **阅读约束**：本文主体保留为租约、DAG、fencing、协议和 durable state 的先例材料；不得把阶段 2 本地后端视为远端中心前置，也不得把 CHG/git/hook 或 server-fleet-manager 假设外推到最小核心。
 > **触发**：v7.3.0（Codex MCP artifact server）发布后的讨论——「artifact 读写全 MCP 化 → 是否可中心化 → 多个 Claude/Codex 分布在不同机器如何协同、如何知道自己做什么」。
-> **决策锚**：PACEflow 的价值区间是长期/中大型/团队/生产（记忆 `paceflow-value-scale-conditional`），协调核正对准这一区间；但**阶段 3（远端中心）在出现真实多机多人用户前不建**。
+> **原决策锚（历史）**：本文曾把「真实多机多人编程用户」作为阶段 3 前置。当前已有跨服务器 dogfood 场景，足以验证最小协调机制；通用产品价值仍需更多用户验证，但不以个人场景限定核心。
 > **方法**：六份子代理报告（原文与可信度标注见 `docs/research/coordination-core/`）：`.pace` 运行态现状地图（代码定锚）、Claude Code 宿主能力（文档盘点，二手，已标偏差）、租约/心跳先例（在线核实）、DAG ready-set 先例（在线核实）、A2A/MCP 协议先例（在线核实）、反例与 durable-state 教训（在线核实）；加 2026-08-16 探针实测（`docs/research/claude-code-plugin-mcp-probe-2026-08-16.md`）。外部来源由研究员一手抓取，主 session 未逐条复核，引用时按各报告标注的「一手/二手」区分。
 
 ---
 
-## 0. 结论（TL;DR）
+## 0. 历史提案结论（TL;DR；不适用于当前最小远端协调核心）
 
 1. **中心要有，但它是「账本 + 锁」，不是「大脑」**：做一个确定性的协调核——任务板索引 + 依赖图 + 租约/心跳 + 锁/编号 + 事件；agent 靠 `claim_next(能力)` 自己知道该做什么。**不做中央 LLM 调度器**（证据见 §2.6：Anthropic 自己把 orchestrator-workers 限定在「子任务不可预知」并把 coding/强依赖任务排除；MAST 量化的最高三类失败恰是确定性机制的靶心；CrewAI/AutoGen 的 LLM 选人有四类可复现故障）。
 2. **真相仍是文件**（git / Obsidian vault 里的 artifact markdown，人可读、可 diff、可进 PR）；**只有协调状态可以中心化**（租约、锁、编号、在册 agent、事件）。这是 Beads 用 26k star 的项目实测走出来的分野：durable state 放 git 文件 ↔ 多写者并发是硬取舍，租约的互斥语义不是 CRDT 能表达的。
@@ -18,7 +21,7 @@
 
 ---
 
-## 1. 问题与范围
+## 1. 历史问题与范围（开发机编程 agent）
 
 **问题**：claude1 / claude2 / codex1 / codex2 分布在不同机器，没有中心 LLM 派活时，各自如何知道该做什么、如何不互相踩、挂了怎么办。
 
